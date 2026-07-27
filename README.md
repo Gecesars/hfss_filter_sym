@@ -19,9 +19,11 @@ escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 ## Status
 
 - Python: `>=3.14`
-- API: FastAPI
+- Servidor padrao: Flask + JavaScript local
+- API tecnica opcional: FastAPI
 - AEDT/HFSS: backend `pyaedt`
 - VNA: backend `pyvisa`
+- Superficie SymMatrix MVP: `/aedt/<method>`, `/hfss/<method>` e `POST /<method>`
 - Testes offline: backends `simulated`
 - Saida de rede: Touchstone `.s2p`
 
@@ -84,6 +86,12 @@ Tambem ha um script equivalente:
 .\.venv\Scripts\python -m hfss_vna_bridge --host 127.0.0.1 --port 8765
 ```
 
+O servidor padrao e Flask. A interface local fica em:
+
+```text
+http://127.0.0.1:8765/
+```
+
 Ou:
 
 ```powershell
@@ -96,7 +104,13 @@ Health check:
 Invoke-RestMethod http://127.0.0.1:8765/health
 ```
 
-Documentacao interativa da API:
+Para executar a API FastAPI anterior:
+
+```powershell
+.\.venv\Scripts\python -m hfss_vna_bridge --server fastapi --host 127.0.0.1 --port 8765
+```
+
+Documentacao interativa da API FastAPI:
 
 - Swagger UI: `http://127.0.0.1:8765/docs`
 - OpenAPI JSON: `http://127.0.0.1:8765/openapi.json`
@@ -123,6 +137,8 @@ hfss_vna_bridge/
       vna/
     api/
     core/
+    services/
+    web/
     cli.py
     settings.py
   tests/
@@ -130,7 +146,38 @@ hfss_vna_bridge/
   uv.lock
 ```
 
-## Endpoints Principais
+## Endpoints Principais Flask/SymMatrix
+
+VNA local:
+
+- `POST /status`
+- `POST /connect`
+- `POST /reset`
+- `POST /setfrequency`
+- `POST /setifbw`
+- `POST /setpower`
+- `POST /setsweeppoints`
+- `POST /singlesweep`
+- `POST /savetracedata`
+- `POST /exports2p`
+
+AEDT/HFSS local:
+
+- `POST /aedt/openproject`
+- `POST /aedt/getdesigns`
+- `POST /aedt/getvariables`
+- `POST /aedt/getvariablesvalue`
+- `POST /aedt/setvariablesvalue`
+- `POST /aedt/evaluatedimension`
+- `POST /aedt/evaluatedimensionnos2p`
+- `POST /hfss/ping`
+- `POST /hfss/openproject`
+- `POST /hfss/updatevalues`
+- `POST /hfss/analyzeall`
+
+Endpoints reservados para o roadmap retornam `status=-501` com `implemented=false`.
+
+## Endpoints REST Tambem Suportados
 
 AEDT/HFSS:
 
@@ -279,6 +326,7 @@ hardware conectado.
 
 - [docs/setup.md](docs/setup.md): instalacao e ambiente.
 - [docs/api_reference.md](docs/api_reference.md): referencia HTTP.
+- [docs/symmatrix_mvp.md](docs/symmatrix_mvp.md): matriz MVP SymMatrix.
 - [docs/architecture.md](docs/architecture.md): desenho da aplicacao.
 - [docs/aedt_contract.md](docs/aedt_contract.md): contrato AEDT/HFSS.
 - [docs/vna_contract.md](docs/vna_contract.md): contrato VNA/SCPI.
@@ -300,4 +348,3 @@ Configurar e enviar:
 git remote add origin https://github.com/Gecesars/hfss_filter_sym.git
 git push -u origin main
 ```
-

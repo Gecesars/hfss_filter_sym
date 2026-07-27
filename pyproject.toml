@@ -12,6 +12,8 @@ license = { text = "Proprietary" }
 authors = [{ name = "HFSS Auto" }]
 dependencies = [
   "fastapi>=0.115",
+  "flask>=3.1",
+  "flask-socketio>=5.5",
   "uvicorn[standard]>=0.34",
   "pydantic>=2.10",
 ]

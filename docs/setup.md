@@ -61,16 +61,28 @@ Alternativa por script:
 .\scripts\setup.ps1 -WithHardware
 ```
 
-## 4. Executar API
+## 4. Executar Servidor Flask
 
 ```powershell
 .\.venv\Scripts\python -m hfss_vna_bridge --host 127.0.0.1 --port 8765
+```
+
+Abra:
+
+```text
+http://127.0.0.1:8765/
 ```
 
 Teste:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/health
+```
+
+Para subir a API FastAPI tecnica:
+
+```powershell
+.\.venv\Scripts\python -m hfss_vna_bridge --server fastapi --host 127.0.0.1 --port 8765
 ```
 
 ## 5. Variaveis de Ambiente
@@ -95,4 +107,3 @@ $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
 ```
 
 Os testes automatizados nao acessam AEDT ou VNA real.
-

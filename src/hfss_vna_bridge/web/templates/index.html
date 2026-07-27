@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HFSS VNA Bridge</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">HV</div>
+        <div>
+          <h1>HFSS VNA Bridge</h1>
+          <p>Flask local server</p>
+        </div>
+      </div>
+      <nav class="top-actions" aria-label="Acoes principais">
+        <button class="icon-button" id="refreshState" title="Atualizar estado">
+          <span aria-hidden="true">&#8635;</span>
+          <span>Atualizar</span>
+        </button>
+        <a class="icon-link" href="/health" title="Abrir health JSON">
+          <span aria-hidden="true">{} </span>
+          <span>Health</span>
+        </a>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="status-grid" aria-label="Estado">
+        <article class="status-tile">
+          <span class="tile-label">AEDT</span>
+          <strong id="aedtState">-</strong>
+          <small id="aedtDetail">-</small>
+        </article>
+        <article class="status-tile">
+          <span class="tile-label">VNA</span>
+          <strong id="vnaState">-</strong>
+          <small id="vnaDetail">-</small>
+        </article>
+        <article class="status-tile">
+          <span class="tile-label">Sweep</span>
+          <strong id="sweepRange">-</strong>
+          <small id="sweepDetail">-</small>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel rail" aria-label="Modulos">
+          <button class="rail-tab active" data-panel="aedtPanel">AEDT</button>
+          <button class="rail-tab" data-panel="vnaPanel">VNA</button>
+          <button class="rail-tab" data-panel="methodsPanel">Metodos</button>
+          <button class="rail-tab" data-panel="logPanel">Log</button>
+        </aside>
+
+        <section class="panel content-panel active" id="aedtPanel">
+          <div class="panel-heading">
+            <h2>AEDT/HFSS</h2>
+            <button class="icon-button" id="connectAedtSim" title="Conectar AEDT simulado">
+              <span aria-hidden="true">&#9679;</span>
+              <span>Simulado</span>
+            </button>
+          </div>
+          <div class="form-grid">
+            <label>
+              Projeto .aedt
+              <input id="aedtProject" value="D:\simulation\painel triband.aedt">
+            </label>
+            <label>
+              Design
+              <input id="aedtDesign" value="HFSSDesign1">
+            </label>
+            <label>
+              Backend
+              <select id="aedtBackend">
+                <option value="simulated">simulated</option>
+                <option value="pyaedt">pyaedt</option>
+              </select>
+            </label>
+            <label>
+              Saida S2P
+              <input id="aedtOutput" value="data\hfss_export.s2p">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="openAedt">Abrir</button>
+            <button id="loadVariables">Variaveis</button>
+            <button id="setVariables">Aplicar JSON</button>
+            <button id="evaluateAedt">Avaliar</button>
+          </div>
+          <textarea id="variablesJson" spellcheck="false">{"arm_scale_a":1.02,"dist_refletor":"21mm"}</textarea>
+          <pre id="aedtOutputJson" class="output"></pre>
+        </section>
+
+        <section class="panel content-panel" id="vnaPanel">
+          <div class="panel-heading">
+            <h2>VNA</h2>
+            <button class="icon-button" id="connectVnaSim" title="Conectar VNA simulado">
+              <span aria-hidden="true">&#9679;</span>
+              <span>Simulado</span>
+            </button>
+          </div>
+          <div class="form-grid">
+            <label>
+              Resource / IP
+              <input id="vnaResource" value="SIM::VNA">
+            </label>
+            <label>
+              Marca
+              <select id="vnaBrand">
+                <option value="SIM">SIM</option>
+                <option value="KS">KS</option>
+                <option value="RS">RS</option>
+                <option value="CMT">CMT</option>
+              </select>
+            </label>
+            <label>
+              Backend
+              <select id="vnaBackend">
+                <option value="simulated">simulated</option>
+                <option value="pyvisa">pyvisa</option>
+              </select>
+            </label>
+            <label>
+              Start Hz
+              <input id="startHz" type="number" value="600000000">
+            </label>
+            <label>
+              Stop Hz
+              <input id="stopHz" type="number" value="1100000000">
+            </label>
+            <label>
+              Pontos
+              <input id="points" type="number" value="201">
+            </label>
+            <label>
+              IFBW Hz
+              <input id="ifbw" type="number" value="1000">
+            </label>
+            <label>
+              Potencia dBm
+              <input id="power" type="number" value="-10">
+            </label>
+            <label>
+              Saida S2P
+              <input id="vnaOutput" value="data\vna_measurement.s2p">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="connectVna">Conectar</button>
+            <button id="applySweep">Configurar</button>
+            <button id="singleSweep">Sweep</button>
+            <button id="saveTrace">Salvar S2P</button>
+          </div>
+          <canvas id="sweepChart" width="960" height="280"></canvas>
+          <pre id="vnaOutputJson" class="output"></pre>
+        </section>
+
+        <section class="panel content-panel" id="methodsPanel">
+          <div class="panel-heading">
+            <h2>Superficie SymMatrix</h2>
+            <button class="icon-button" id="loadMethods" title="Atualizar metodos">
+              <span aria-hidden="true">&#8635;</span>
+              <span>Atualizar</span>
+            </button>
+          </div>
+          <div id="methodMatrix" class="method-matrix"></div>
+        </section>
+
+        <section class="panel content-panel" id="logPanel">
+          <div class="panel-heading">
+            <h2>Log</h2>
+            <button class="icon-button" id="clearLog" title="Limpar log">
+              <span aria-hidden="true">&times;</span>
+              <span>Limpar</span>
+            </button>
+          </div>
+          <pre id="eventLog" class="log"></pre>
+        </section>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </body>
+</html>

@@ -6,8 +6,11 @@ Base URL padrao:
 http://127.0.0.1:8765
 ```
 
-Todas as rotas usam JSON, exceto `GET /health`, `GET /aedt/designs`,
-`GET /aedt/variables`, `GET /vna/status` e os documentos automaticos do FastAPI.
+O servidor padrao e Flask. Ele expoe uma interface JS em `/`, a superficie
+compativel com SymMatrix e aliases REST. A API FastAPI anterior continua
+disponivel com `--server fastapi`.
+
+Todas as rotas de comando usam JSON.
 
 ## Health
 
@@ -33,6 +36,39 @@ Resposta:
 ```
 
 ## AEDT/HFSS
+
+### Superficie SymMatrix Flask
+
+- `POST /aedt/openproject`
+- `POST /aedt/getdesigns`
+- `POST /aedt/setactivedesign`
+- `POST /aedt/getvariables`
+- `POST /aedt/getvariablesvalue`
+- `POST /aedt/setvariablesvalue`
+- `POST /aedt/evaluatedimension`
+- `POST /aedt/evaluatedimensionnos2p`
+
+Exemplo:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/aedt/openproject `
+  -Method Post -ContentType "application/json" `
+  -Body '{"backend":"simulated","design_name":"OfflineDesign"}'
+```
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/aedt/setvariablesvalue `
+  -Method Post -ContentType "application/json" `
+  -Body '{"names":["arm_scale_a"],"values":[1.04]}'
+```
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/aedt/evaluatedimension `
+  -Method Post -ContentType "application/json" `
+  -Body '{"names":["dist_refletor"],"dimension":["22mm"],"output_touchstone":"data\\hfss.s2p"}'
+```
+
+### Aliases REST
 
 ### `POST /aedt/session`
 
@@ -112,6 +148,55 @@ Resposta:
 ```
 
 ## VNA
+
+### Superficie SymMatrix Flask
+
+- `POST /status`
+- `POST /connect`
+- `POST /close`
+- `POST /reset`
+- `POST /clearerrmsg`
+- `POST /initialize2`
+- `POST /loadpreset`
+- `POST /setfrequency`
+- `POST /setifbw`
+- `POST /setpower`
+- `POST /setsweeppoints`
+- `POST /setsweeptype`
+- `POST /setcontinoussweep`
+- `POST /settrace`
+- `POST /settracestatus`
+- `POST /setmarkers`
+- `POST /setautoscaletrace`
+- `POST /getsweeptime`
+- `POST /getmarkeryvalue`
+- `POST /savetracedata`
+- `POST /deleteallmarkers`
+- `POST /deletetraces`
+- `POST /singlesweep`
+- `POST /beginbackgroundsweep`
+- `POST /endbackgroundsweep`
+- `POST /exports2p`
+
+Exemplo:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/connect `
+  -Method Post -ContentType "application/json" `
+  -Body '{"backend":"simulated","brand":"SIM"}'
+```
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/setfrequency `
+  -Method Post -ContentType "application/json" `
+  -Body '{"startFreq":0.6,"stopFreq":1.1}'
+```
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/singlesweep -Method Post
+```
+
+### Aliases REST
 
 ### `POST /vna/connect`
 
@@ -220,4 +305,3 @@ Aceita `start_hz`/`stop_hz` ou `center_hz`/`span_hz`.
 ```json
 {"value": -10}
 ```
-

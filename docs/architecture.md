@@ -6,24 +6,40 @@ restante do codigo possa ser testado sem AEDT, VISA ou instrumentos fisicos.
 
 ## Camadas
 
-1. `api`: FastAPI, validacao de payloads e serializacao de respostas.
-2. `core`: tipos compartilhados, estado de runtime e escrita Touchstone.
-3. `adapters.aedt`: backends AEDT/HFSS.
-4. `adapters.vna`: backends VNA/SCPI.
-5. `tests`: testes offline com adaptadores simulados.
+1. `web`: Flask, SocketIO MVP e interface JavaScript local.
+2. `services`: despacho compativel com o modelo SymMatrix.
+3. `api`: FastAPI tecnica opcional, preservada para clientes REST modernos.
+4. `core`: tipos compartilhados, estado de runtime e escrita Touchstone.
+5. `adapters.aedt`: backends AEDT/HFSS.
+6. `adapters.vna`: backends VNA/SCPI.
+7. `tests`: testes offline com adaptadores simulados.
 
 ## Fluxo de Dependencias
 
 ```text
 Cliente HTTP
-  -> FastAPI routes
+  -> Flask routes ou FastAPI routes
+    -> SymMatrixDispatcher
     -> RuntimeRegistry
       -> AedtAdapter ou VnaAdapter
         -> PyAEDT, PyVISA ou simulador
 ```
 
-A API nao importa AEDT ou PyVISA diretamente. Esses imports ficam nos adaptadores
-reais e sao tardios. Isso permite iniciar a aplicacao mesmo sem AEDT instalado.
+As rotas nao importam AEDT ou PyVISA diretamente. Esses imports ficam nos
+adaptadores reais e sao tardios. Isso permite iniciar a aplicacao mesmo sem AEDT
+instalado.
+
+## Modelo Flask/JS
+
+O servidor Flask e o ponto principal do MVP. Ele expoe:
+
+- `GET /`: painel JavaScript local;
+- `GET /health`: estado geral;
+- `GET /api/state`: snapshot para a UI;
+- `POST /<method>`: superficie VNA compativel;
+- `POST /aedt/<method>`: superficie AEDT compativel;
+- `POST /hfss/<method>`: superficie HFSS reservada/compatibilidade;
+- eventos SocketIO reservados para tuning e otimizacao.
 
 ## RuntimeRegistry
 
@@ -94,4 +110,3 @@ Os testes usam apenas simuladores. Isso cobre:
 
 Testes com AEDT e VNA reais devem ser adicionados como testes manuais ou
 marcados como integracao, pois dependem de licenca, hardware e laboratorio.
-

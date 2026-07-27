@@ -1,0 +1,303 @@
+:root {
+  color-scheme: light;
+  --bg: #eef2f5;
+  --panel: #ffffff;
+  --ink: #1b2733;
+  --muted: #647386;
+  --line: #d7dde5;
+  --accent: #155e75;
+  --accent-2: #6f4e37;
+  --ok: #277a4a;
+  --warn: #a05a00;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 "Segoe UI", Arial, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+.icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  padding: 0 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button:hover,
+.icon-link:hover {
+  border-color: var(--accent);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #b9c7d4;
+  border-radius: var(--radius);
+  background: #dbe7ee;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 20px;
+}
+
+h2 {
+  font-size: 18px;
+}
+
+h3 {
+  font-size: 14px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.brand p,
+small,
+.tile-label {
+  color: var(--muted);
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.shell {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-tile,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.status-tile {
+  display: grid;
+  gap: 4px;
+  min-height: 92px;
+  padding: 14px;
+}
+
+.status-tile strong {
+  font-size: 18px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  min-height: calc(100vh - 170px);
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.rail-tab {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.rail-tab.active {
+  border-color: var(--accent);
+  background: #e7f2f5;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.content-panel {
+  display: none;
+  padding: 16px;
+}
+
+.content-panel.active {
+  display: block;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea,
+pre {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+}
+
+input,
+select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+textarea {
+  min-height: 140px;
+  margin-top: 12px;
+  padding: 10px;
+  resize: vertical;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.button-row button:first-child,
+.panel-heading button {
+  border-color: var(--accent);
+}
+
+.output,
+.log {
+  min-height: 180px;
+  max-height: 340px;
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 12px;
+  background: #0f1720;
+  color: #d8edf3;
+  font-family: Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+}
+
+#sweepChart {
+  display: block;
+  width: 100%;
+  height: 280px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f7f8fb;
+}
+
+.method-matrix {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.method-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.method-chip {
+  justify-content: flex-start;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+@media (max-width: 900px) {
+  .status-grid,
+  .workspace,
+  .form-grid,
+  .method-matrix {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rail {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .rail-tab {
+    width: auto;
+  }
+}
+
