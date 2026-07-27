@@ -64,6 +64,9 @@ class VnaConnectRequest(BaseModel):
     backend: Literal["simulated", "pyvisa"] = "simulated"
     resource: str = "SIM::VNA"
     timeout_ms: int = 30_000
+    brand: str | None = None
+    visa_library: str | None = None
+    channel: int = 1
 
 
 class SweepConfigRequest(BaseModel):

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hfss-vna-bridge"
-version = "0.3.0"
+version = "0.4.0"
 description = "Original Python bridge for AEDT/HFSS automation and VNA acquisition"
 readme = "README.md"
 requires-python = ">=3.14"

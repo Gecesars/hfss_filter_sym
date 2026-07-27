@@ -22,6 +22,8 @@ class SimulatedAedtAdapter:
             "comp_refletor": "80mm",
             "refl_lat": "16mm",
         }
+        self._model_history: list[dict[str, Any]] = []
+        self._analysis_config: dict[str, Any] = {}
 
     @property
     def state(self) -> AdapterState:
@@ -180,6 +182,55 @@ class SimulatedAedtAdapter:
         linked_data: bool = False,
     ) -> bool:
         del entire_solution, field, mesh, linked_data
+        self._require_connected()
+        return True
+
+    def configure_analysis(self, config: dict[str, Any]) -> dict[str, Any]:
+        self._require_connected()
+        self._analysis_config = dict(config)
+        return {
+            "configured": True,
+            "setup": config.get("name", "FilterSetup"),
+            "sweep": config.get("sweep_name", "FilterSweep"),
+            "config": dict(config),
+        }
+
+    def build_model(self, plan: dict[str, Any]) -> dict[str, Any]:
+        self._require_connected()
+        result = {
+            "built": not bool(plan.get("dry_run")),
+            "dry_run": bool(plan.get("dry_run")),
+            "recipe": plan["recipe"],
+            "name": plan["name"],
+            "objects": [item["name"] for item in plan["objects"]],
+            "object_count": len(plan["objects"]),
+            "operations": list(plan.get("operations", [])),
+            "ports": list(plan.get("ports", [])) if plan.get("assign_ports", True) else [],
+            "setup": self.configure_analysis(plan["setup"]),
+            "plan": plan,
+        }
+        self._model_history.append(result)
+        return result
+
+    def validate_design(self, expected_ports: int | None = None) -> dict[str, Any]:
+        self._require_connected()
+        return {
+            "valid": True,
+            "messages": [],
+            "expected_ports": expected_ports,
+            "backend": "simulated",
+        }
+
+    def export_results(self, output_dir: str | Path) -> list[str]:
+        self._require_connected()
+        output = Path(output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        touchstone = output / "simulated_results.s2p"
+        write_s2p(touchstone, self._synthetic_network(), comment="simulated AEDT results")
+        return [str(touchstone)]
+
+    def stop_analysis(self, clean_stop: bool = True) -> bool:
+        del clean_stop
         self._require_connected()
         return True
 

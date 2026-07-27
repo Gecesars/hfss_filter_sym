@@ -109,6 +109,39 @@ Notas:
 
 Detalhes verificados em [aedt_2026_integration.md](aedt_2026_integration.md).
 
+## Setup, Modelo e Jobs
+
+Configuracao:
+
+```text
+POST /api/aedt/configureanalysis
+```
+
+O payload define `setup_name`, `sweep_name`, `f0_ghz`, `start_ghz`, `stop_ghz`,
+`points`, `maximum_passes`, `max_delta_s` e `sweep_type`.
+
+Modelos devem ser visualizados primeiro em `POST /api/modeling/plan`. A execucao
+usa as rotas `/api/hfss/<method>` documentadas em
+[full_functionality.md](full_functionality.md).
+
+Analises longas usam a fila:
+
+```text
+POST /api/jobs
+GET  /api/jobs
+GET  /api/jobs/<id>
+POST /api/jobs/<id>/cancel
+```
+
+Operacoes adicionais:
+
+- `POST /api/aedt/validatedesign`;
+- `POST /api/aedt/exportresults`;
+- `POST /api/aedt/stopanalysis`;
+- `POST /api/aedt/createreport`;
+- `POST /api/aedt/callconvergence`;
+- `POST /api/aedt/callkillmesh`.
+
 ## Erros Esperados
 
 - PyAEDT nao instalado: instale `.[aedt]`.

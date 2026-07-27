@@ -92,6 +92,21 @@ class AedtAdapter(Protocol):
     ) -> bool:
         raise NotImplementedError
 
+    def configure_analysis(self, config: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def build_model(self, plan: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def validate_design(self, expected_ports: int | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def export_results(self, output_dir: str | Path) -> list[str]:
+        raise NotImplementedError
+
+    def stop_analysis(self, clean_stop: bool = True) -> bool:
+        raise NotImplementedError
+
     def release(
         self,
         *,

@@ -12,9 +12,14 @@ from hfss_vna_bridge.adapters.vna.pyvisa_adapter import PyVisaVnaAdapter
 from hfss_vna_bridge.adapters.vna.simulated import SimulatedVnaAdapter
 from hfss_vna_bridge.core.models import AdapterState, NetworkPoint, SweepConfig
 from hfss_vna_bridge.core.registry import RuntimeRegistry
+from hfss_vna_bridge.services.jobs import JobManager
+from hfss_vna_bridge.services.modeling import HFSS_RECIPE_MAP, model_plan
 
 VNA_METHODS = [
     "status",
+    "resources",
+    "capabilities",
+    "errors",
     "connect",
     "close",
     "reset",
@@ -56,6 +61,10 @@ AEDT_METHODS = [
     "evaluatedimensionnos2p",
     "callconvergence",
     "callkillmesh",
+    "configureanalysis",
+    "validatedesign",
+    "exportresults",
+    "stopanalysis",
     "diagnostics",
     "sessioninfo",
     "release",
@@ -97,6 +106,9 @@ HFSS_METHODS = [
     "lpf_openstub_modeling",
     "lpf_elliptic_modeling",
     "lpf_custom_modeling",
+    "validatedesign",
+    "exportresults",
+    "stopanalysis",
 ]
 
 
@@ -126,6 +138,7 @@ class SymMatrixDispatcher:
         self.registry = registry
         self.vna_state = VnaSessionState()
         self.aedt_state = AedtSessionState()
+        self.jobs = JobManager(max_workers=1)
 
     def health(self) -> dict[str, Any]:
         return self._ok(
@@ -188,7 +201,9 @@ class SymMatrixDispatcher:
         normalized = _normalize_method(method)
         handler = getattr(self, f"_hfss_{normalized}", None)
         if handler is None:
-            return self._planned("hfss", method)
+            if normalized in HFSS_RECIPE_MAP:
+                return self._hfss_build_model(method, payload or {})
+            return self._unsupported("hfss", method)
         return handler(payload or {})
 
     def _vna_status(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -201,6 +216,21 @@ class SymMatrixDispatcher:
             methods=VNA_METHODS,
             last_sweep_points=len(self.vna_state.last_sweep),
         )
+
+    def _vna_resources(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._ok(
+            **PyVisaVnaAdapter.discover(_first_text(payload, "visa_library", "library"))
+        )
+
+    def _vna_capabilities(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        return self._ok(capabilities=self.registry.vna.capabilities())
+
+    def _vna_errors(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        errors = self.registry.vna.query_errors()
+        self.vna_state.errors = list(errors)
+        return self._ok(errors=errors)
 
     def _vna_connect(self, payload: dict[str, Any]) -> dict[str, Any]:
         brand = str(payload.get("brand") or payload.get("targetType") or "SIM").upper()
@@ -219,18 +249,29 @@ class SymMatrixDispatcher:
             timeout_ms = int(payload.get("timeout_ms") or payload.get("timeout") or 30_000)
             if not resource:
                 raise ValueError("VNA resource or IPaddr is required for pyvisa backend")
-            adapter = PyVisaVnaAdapter(resource, timeout_ms=timeout_ms)
+            adapter = PyVisaVnaAdapter(
+                resource,
+                timeout_ms=timeout_ms,
+                brand=brand,
+                visa_library=_first_text(payload, "visa_library", "library"),
+                channel=int(payload.get("channel") or 1),
+            )
         else:
             raise ValueError(f"Unsupported VNA backend: {backend}")
 
         state = adapter.connect()
         self.registry.vna = adapter
         self.vna_state.brand = brand
-        return self._ok(state=self._adapter_state(state), brand=brand)
+        return self._ok(
+            state=self._adapter_state(state),
+            brand=brand,
+            capabilities=adapter.capabilities(),
+        )
 
     def _vna_close(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
         resource = self.registry.vna.state.resource or "SIM::VNA"
+        self.registry.vna.close()
         self.registry.vna = SimulatedVnaAdapter(resource)
         self.vna_state.last_sweep = []
         return self._ok(state=self._adapter_state(self.registry.vna.state))
@@ -245,14 +286,22 @@ class SymMatrixDispatcher:
 
     def _vna_clearerrmsg(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
+        if self.registry.vna.state.connected:
+            self.registry.vna.clear_errors()
         self.vna_state.errors.clear()
         return self._ok(errors=[])
 
     def _vna_initialize2(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
-        return self._ok(initialized=True)
+        return self._ok(
+            initialized=True,
+            capabilities=self.registry.vna.capabilities(),
+        )
 
     def _vna_loadpreset(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = _first_text(payload, "path", "filePath", "preset")
+        if path and hasattr(self.registry.vna, "load_state"):
+            self.registry.vna.load_state(path)
         self.vna_state.traces["preset"] = {"payload": payload}
         return self._ok(loaded=True, preset=payload)
 
@@ -347,12 +396,12 @@ class SymMatrixDispatcher:
 
     def _vna_setsweeptype(self, payload: dict[str, Any]) -> dict[str, Any]:
         sweep_type = str(_first(payload, "sweepType", "type", "value") or "LIN").upper()
-        self.vna_state.sweep_type = sweep_type
+        self.vna_state.sweep_type = self.registry.vna.set_sweep_type(sweep_type)
         return self._ok(sweep_type=sweep_type)
 
     def _vna_setcontinoussweep(self, payload: dict[str, Any]) -> dict[str, Any]:
-        enabled = bool(_first(payload, "enabled", "on", "continuous", "value"))
-        self.vna_state.continuous_sweep = enabled
+        enabled = _coerce_bool(_first(payload, "enabled", "on", "continuous", "value"))
+        self.vna_state.continuous_sweep = self.registry.vna.set_continuous(enabled)
         return self._ok(continuous_sweep=enabled)
 
     def _vna_settrace(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -369,21 +418,35 @@ class SymMatrixDispatcher:
     def _vna_setmarkers(self, payload: dict[str, Any]) -> dict[str, Any]:
         marker_id = str(_first(payload, "marker", "markerNum", "index") or len(self.vna_state.markers) + 1)
         self.vna_state.markers[marker_id] = dict(payload)
-        return self._ok(marker=marker_id, markers=self.vna_state.markers)
+        frequency = _first(payload, "freq_hz", "frequency", "freq", "x")
+        hardware = None
+        if frequency is not None:
+            hardware = self.registry.vna.configure_marker(
+                int(marker_id),
+                _frequency_to_hz(
+                    frequency,
+                    str(payload.get("unit") or "").lower() or None,
+                ),
+            )
+        return self._ok(marker=marker_id, markers=self.vna_state.markers, hardware=hardware)
 
     def _vna_setautoscaletrace(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace_id = str(_first(payload, "trace", "traceNum", "index") or "1")
         trace = self.vna_state.traces.setdefault(trace_id, {})
         trace["autoscale"] = True
+        self.registry.vna.autoscale(int(trace_id))
         return self._ok(trace=trace_id, traces=self.vna_state.traces)
 
     def _vna_getsweeptime(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
-        config = self.registry.vna.sweep_config
-        seconds = max(0.05, config.points / max(config.ifbw_hz, 1.0) * 0.025)
+        seconds = self.registry.vna.sweep_time()
         return self._ok(time=seconds)
 
     def _vna_getmarkeryvalue(self, payload: dict[str, Any]) -> dict[str, Any]:
+        marker_id = _first(payload, "marker", "markerNum", "index")
+        if marker_id is not None:
+            point = self.registry.vna.marker_value(int(marker_id))
+            return self._ok(value=point["magnitude_db"], point=point)
         marker_freq = _first(payload, "freq_hz", "frequency", "freq", "x")
         if marker_freq is None or not self.vna_state.last_sweep:
             return self._ok(value=None)
@@ -404,6 +467,8 @@ class SymMatrixDispatcher:
 
     def _vna_deleteallmarkers(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
+        if hasattr(self.registry.vna, "delete_markers"):
+            self.registry.vna.delete_markers()
         self.vna_state.markers.clear()
         return self._ok(markers={})
 
@@ -420,11 +485,13 @@ class SymMatrixDispatcher:
 
     def _vna_beginbackgroundsweep(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
+        self.registry.vna.set_continuous(True)
         self.vna_state.background_sweep = True
         return self._ok(background_sweep=True)
 
     def _vna_endbackgroundsweep(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
+        self.registry.vna.set_continuous(False)
         self.vna_state.background_sweep = False
         return self._ok(background_sweep=False)
 
@@ -514,7 +581,8 @@ class SymMatrixDispatcher:
         return self._ok(report=report)
 
     def _aedt_makelpfmodel(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._planned("aedt", "makelpfmodel", payload=payload)
+        plan = model_plan("makelpfmodel", payload)
+        return self._ok(model=self.registry.aedt.build_model(plan))
 
     def _aedt_evaluatedimension(self, payload: dict[str, Any]) -> dict[str, Any]:
         variables = _variables_from_payload(payload, names_key="names", values_key="dimension")
@@ -561,6 +629,24 @@ class SymMatrixDispatcher:
             linked_data=_coerce_bool(payload.get("linked_data", False)),
         )
         return self._ok(removed=removed)
+
+    def _aedt_configureanalysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        config = _analysis_config_from_payload(payload)
+        return self._ok(configuration=self.registry.aedt.configure_analysis(config))
+
+    def _aedt_validatedesign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        expected_ports = _optional_int(_first(payload, "expected_ports", "ports"))
+        return self._ok(validation=self.registry.aedt.validate_design(expected_ports))
+
+    def _aedt_exportresults(self, payload: dict[str, Any]) -> dict[str, Any]:
+        output = _first_text(payload, "output_dir", "output", "path") or "data/hfss_results"
+        return self._ok(files=self.registry.aedt.export_results(output))
+
+    def _aedt_stopanalysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        stopped = self.registry.aedt.stop_analysis(
+            clean_stop=_coerce_bool(payload.get("clean_stop", True))
+        )
+        return self._ok(stopped=stopped)
 
     def _aedt_diagnostics(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
@@ -617,7 +703,101 @@ class SymMatrixDispatcher:
         return self._aedt_callkillmesh(payload)
 
     def _hfss_analyzeall(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if _coerce_bool(payload.get("async", False)) or not _coerce_bool(
+            payload.get("blocking", True)
+        ):
+            return self._ok(job=self.submit_aedt_job(payload))
         return self._aedt_evaluatedimensionnos2p(payload)
+
+    def _hfss_updatemeshsetting(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._aedt_configureanalysis(payload)
+
+    def _hfss_iosimulation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._hfss_run_simulation(payload)
+
+    def _hfss_full3dsimulation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._hfss_run_simulation(payload)
+
+    def _hfss_lumpportsimulation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._hfss_run_simulation(payload)
+
+    def _hfss_planarsimulation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._hfss_run_simulation(payload)
+
+    def _hfss_validatedesign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._aedt_validatedesign(payload)
+
+    def _hfss_exportresults(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._aedt_exportresults(payload)
+
+    def _hfss_stopanalysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._aedt_stopanalysis(payload)
+
+    def _hfss_run_simulation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if _coerce_bool(payload.get("async", True)):
+            return self._ok(job=self.submit_aedt_job(payload))
+        return self._aedt_evaluatedimension(payload)
+
+    def _hfss_build_model(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+        plan = model_plan(method, payload)
+        model = self.registry.aedt.build_model(plan)
+        result: dict[str, Any] = {"model": model}
+        if _coerce_bool(payload.get("analyze", False)) and not plan.get("dry_run"):
+            result["job"] = self.submit_aedt_job(
+                {
+                    **payload,
+                    "setup_name": plan["setup"]["name"],
+                    "sweep_name": plan["setup"]["sweep_name"],
+                }
+            )
+        return self._ok(**result)
+
+    def submit_aedt_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.registry.aedt.state.connected:
+            raise RuntimeError("AEDT adapter is not connected")
+        job_payload = dict(payload)
+        job_payload["blocking"] = True
+        job_payload.pop("async", None)
+
+        def operation(cancel_event: Any, progress: Any) -> dict[str, Any]:
+            if cancel_event.is_set():
+                return {}
+            progress(0.08, "Applying design variables")
+            variables = _variables_from_payload(job_payload)
+            if variables:
+                self.registry.aedt.set_variables(variables)
+            if cancel_event.is_set():
+                return {}
+            progress(0.18, "Starting HFSS analysis")
+            result = self.registry.aedt.analyze(
+                setup_name=_first_text(job_payload, "setup_name", "setup"),
+                sweep_name=_first_text(job_payload, "sweep_name", "sweep"),
+                output_touchstone=_touchstone_output_from_payload(job_payload),
+                cores=_optional_int(job_payload.get("cores")),
+                tasks=_optional_int(job_payload.get("tasks")),
+                gpus=_optional_int(job_payload.get("gpus")),
+                blocking=True,
+                revert_to_initial_mesh=_coerce_bool(
+                    job_payload.get("revert_to_initial_mesh", False)
+                ),
+            )
+            progress(0.95, "Collecting HFSS results")
+            self.aedt_state.last_analysis = result
+            return result
+
+        return self.jobs.submit("aedt-analysis", payload, operation)
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        return self.jobs.list()
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        return self.jobs.get(job_id)
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        return self.jobs.cancel(
+            job_id,
+            stop=lambda: self.registry.aedt.stop_analysis(clean_stop=True),
+        )
 
     def _hfss_ping(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
@@ -665,18 +845,6 @@ class SymMatrixDispatcher:
             "method": method,
             "message": "Method is not part of the current compatibility surface.",
         }
-
-    def _planned(self, category: str, method: str, **data: Any) -> dict[str, Any]:
-        return {
-            "status": -501,
-            "ok": False,
-            "implemented": False,
-            "category": category,
-            "method": method,
-            "message": "Endpoint is reserved for the SymMatrix-compatible roadmap.",
-            **data,
-        }
-
 
 def _normalize_method(method: str) -> str:
     return method.replace("-", "").replace("_", "").lower()
@@ -773,6 +941,25 @@ def _touchstone_output_from_payload(payload: dict[str, Any]) -> str | None:
     if not filename.lower().endswith(".s2p"):
         filename = f"{filename}.s2p"
     return str(Path(output_dir or "data") / filename)
+
+
+def _analysis_config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    start = _first(payload, "start_frequency_ghz", "start_ghz", "start")
+    stop = _first(payload, "stop_frequency_ghz", "stop_ghz", "stop")
+    center = _first(payload, "center_frequency_ghz", "f0_ghz", "frequency_ghz")
+    return {
+        "name": _first_text(payload, "setup_name", "setup", "name") or "FilterSetup",
+        "sweep_name": _first_text(payload, "sweep_name", "sweep") or "FilterSweep",
+        "center_frequency_ghz": float(center if center is not None else 1.0),
+        "start_frequency_ghz": float(start if start is not None else 0.8),
+        "stop_frequency_ghz": float(stop if stop is not None else 1.2),
+        "points": int(_first(payload, "points", "sweep_points") or 401),
+        "maximum_passes": int(
+            _first(payload, "maximum_passes", "passes", "max_passes") or 12
+        ),
+        "max_delta_s": float(_first(payload, "max_delta_s", "delta_s") or 0.02),
+        "sweep_type": str(payload.get("sweep_type") or "Interpolating"),
+    }
 
 
 def _point_summary(point: NetworkPoint) -> dict[str, float]:

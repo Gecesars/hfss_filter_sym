@@ -61,6 +61,14 @@ Alternativa por script:
 .\scripts\setup.ps1 -WithHardware
 ```
 
+Testes da interface:
+
+```powershell
+npm install
+npx playwright install chromium
+npm run test:ui
+```
+
 ## 4. Executar Servidor Flask
 
 ```powershell
@@ -97,6 +105,8 @@ $env:HFSS_BRIDGE_AEDT_PROJECT = "D:\simulation\painel triband.aedt"
 $env:HFSS_BRIDGE_AEDT_DESIGN = "HFSSDesign1"
 $env:HFSS_BRIDGE_VNA_BACKEND = "simulated"
 $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
+$env:HFSS_BRIDGE_DATA_DIR = "data"
+$env:HFSS_BRIDGE_PROJECT_DIR = "data\projects"
 ```
 
 ## 6. Validacao

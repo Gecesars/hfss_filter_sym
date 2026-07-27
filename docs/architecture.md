@@ -17,13 +17,16 @@ Browser
   |
   +-- /api/aedt/*, /aedt/*, /hfss/*
   |     -> SymMatrixDispatcher
-  |          -> RuntimeRegistry
+  |          -> JobManager -> RuntimeRegistry
   |               -> SimulatedAedtAdapter ou PyAedtAdapter
   |
   +-- /api/vna/*, /vna/*, /*
-        -> SymMatrixDispatcher
-             -> RuntimeRegistry
-                  -> SimulatedVnaAdapter ou PyVisaVnaAdapter
+  |     -> SymMatrixDispatcher
+  |          -> RuntimeRegistry
+  |               -> SimulatedVnaAdapter ou PyVisaVnaAdapter
+  |
+  +-- /api/projects, /api/library, /api/engineering/*
+        -> ProjectStore + engineering services
 ```
 
 O caminho de sintese nao acessa AEDT ou VNA. O caminho de integracao nao depende
@@ -75,6 +78,19 @@ Valida unidades e orquestra o motor sem estado. Retorna:
 
 A funcao e deterministica: o mesmo payload produz o mesmo resultado.
 
+### `engines.engineering`
+
+Implementa otimizacao global, Monte Carlo, tuning por sensibilidades e
+calculadoras de linhas. Nao acessa AEDT nem VISA.
+
+### Servicos Operacionais
+
+- `services.modeling`: gera planos parametricos HFSS sem efeitos colaterais;
+- `services.jobs`: serializa solves e registra progresso/cancelamento;
+- `services.project_store`: persiste JSON atomico e revisoes;
+- `services.multiplexer`: compoe canais em um grid comum;
+- `services.library`: entrega templates versionados.
+
 ### `services.symmatrix`
 
 Traduz nomes e formatos de interoperabilidade para os contratos internos.
@@ -83,7 +99,7 @@ Mantem:
 - estado complementar da sessao AEDT;
 - ultima medicao VNA;
 - configuracoes que nao pertencem ao adaptador;
-- lista de metodos implementados e reservados.
+- lista de metodos implementados.
 
 Metodos sao normalizados removendo `-` e `_` e convertendo para minusculas.
 
@@ -95,7 +111,7 @@ Contem tipos estaveis:
 - `SweepConfig`;
 - `NetworkPoint`;
 - `RuntimeRegistry`;
-- escrita Touchstone.
+- leitura/escrita Touchstone e comparacao de redes.
 
 ### `adapters.aedt`
 
@@ -115,7 +131,8 @@ Backends:
 O import de PyAEDT e tardio. A aplicacao pode iniciar sem AEDT instalado.
 `installations.py` detecta versoes e sessoes gRPC. O backend 2026.1 suporta
 attach por porta, attach por PID, nova sessao, setup/sweep, HPC, Touchstone,
-relatorios, convergencia, save e limpeza seletiva.
+relatorios, convergencia, save, modelagem parametrica, validacao, exportacao,
+cancelamento e limpeza seletiva.
 
 ### `adapters.vna`
 
@@ -125,7 +142,8 @@ Contrato:
 - consultar estado;
 - resetar;
 - configurar sweep;
-- medir;
+- medir `S11`, `S21`, `S12` e `S22`;
+- controlar markers, sweep continuo e fila de erros;
 - salvar Touchstone.
 
 Backends:
@@ -134,6 +152,8 @@ Backends:
 - `PyVisaVnaAdapter`.
 
 O adaptador real concentra comandos SCPI e a sessao VISA.
+`profiles.py` isola os dialetos Keysight, Rohde & Schwarz, Copper Mountain e
+generic SCPI.
 
 ### `api`
 
@@ -149,7 +169,9 @@ Uma instancia Flask possui um `RuntimeRegistry`:
 - um adaptador AEDT ativo;
 - um adaptador VNA ativo;
 - uma configuracao de sweep;
-- uma ultima medicao.
+- uma ultima medicao;
+- uma fila AEDT;
+- um armazenamento de projetos.
 
 Trocar backend substitui o adaptador do dominio correspondente.
 
@@ -162,6 +184,8 @@ O frontend possui estado efemero para:
 - matriz editada;
 - projeto sujo;
 - medicao VNA para overlay;
+- resultado HFSS para overlay;
+- modulo, projeto, biblioteca e job selecionados;
 - marcador e visibilidade de curvas.
 
 Esse estado e serializado pelo formato de projeto JSON. Estado de conexao nunca
@@ -174,28 +198,23 @@ e restaurado do arquivo.
 | `0` | 200 | Operacao concluida |
 | `-400` | 400 | Payload de sintese invalido |
 | `-404` | 200 | Metodo fora da superficie conhecida |
-| `-501` | 200 | Metodo conhecido e planejado |
 | `-500` | 500 | Falha de backend ou conversao |
 
-Endpoints de compatibilidade preservam HTTP 200 para metodos planejados porque
-clientes legados inspecionam o campo `status`.
+Os metodos publicados em `/health` possuem handler. `-404` permanece apenas
+para chamadas fora da superficie conhecida.
 
 ## Concorrencia
 
-A versao atual assume:
+A versao atual garante:
 
 - uma sessao AEDT por processo;
 - um VNA por processo;
-- chamadas de integracao serializadas pelo cliente;
+- jobs AEDT serializados por um `ThreadPoolExecutor` de um worker;
+- progresso e cancelamento consultaveis;
 - calculos numericos curtos executados na thread Flask.
 
-Antes de habilitar multiplos usuarios ou analyses longas, adicionar:
-
-1. fila de jobs;
-2. identificador de projeto/sessao;
-3. lock por adaptador;
-4. armazenamento de progresso;
-5. cancelamento cooperativo.
+Para multiplos usuarios, ainda seriam necessarios autenticacao, isolamento de
+sessao e locks distribuidos.
 
 ## Seguranca
 
@@ -213,7 +232,7 @@ somente ao servidor local.
 
 ## Touchstone
 
-`core.touchstone` escreve:
+`core.touchstone` le RI/MA/DB e escreve:
 
 ```text
 # Hz S RI R 50
@@ -234,8 +253,13 @@ Testes offline cobrem:
 - contrato PyAEDT 2026 e argumento `output_file`;
 - fluxo AEDT simulado;
 - fluxo VNA simulado;
+- aquisicao PyVISA de quatro parametros com instrumento mockado;
+- parser e comparador Touchstone;
+- projetos e revisoes;
+- modelagem cavity/planar/SIW;
+- otimizacao, Monte Carlo, multiplexer e linhas;
 - escrita `.s2p`;
-- endpoints planejados.
+- Playwright em desktop/mobile e fluxos de modulo.
 
 Testes de integracao reais devem ser opt-in e separados por marcadores porque
 dependem de licenca, desktop AEDT, VISA e equipamento.

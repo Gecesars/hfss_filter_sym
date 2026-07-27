@@ -256,6 +256,31 @@ Nova sessao non-graphical:
 
 Analise e exportacao so ocorrem com `--analyze`.
 
+## Recursos 0.4.0
+
+A integracao tambem implementa:
+
+- criacao/atualizacao de setup e linear-count sweep;
+- validacao completa com numero esperado de portas;
+- geracao parametrica de cavity, combline, waveguide, planar, SIW e LPF;
+- exportacao agregada de resultados;
+- interrupcao por `stop_simulations(clean_stop=True)`;
+- fila serializada com progresso e cancelamento.
+
+Preview de modelagem usa `POST /api/modeling/plan` e nao acessa o desktop. A
+construcao real ocorre somente quando `dry_run=false`.
+
+Solves longos devem usar:
+
+```text
+POST /api/jobs
+GET  /api/jobs/<id>
+POST /api/jobs/<id>/cancel
+```
+
+A fila possui um worker para impedir mutacoes concorrentes no mesmo objeto
+PyAEDT/design.
+
 ## Seguranca Operacional
 
 - servidor limitado a `127.0.0.1`;

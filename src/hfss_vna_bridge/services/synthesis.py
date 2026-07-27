@@ -5,7 +5,10 @@ from typing import Any
 
 import numpy as np
 
-from hfss_vna_bridge.engines.filter_engine import design_filter_network
+from hfss_vna_bridge.engines.filter_engine import (
+    coupling_matrix_response,
+    design_filter_network,
+)
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,80 @@ def synthesize_filter(payload: dict[str, Any]) -> dict[str, Any]:
             "frequency_points": len(frequencies_hz),
             "input_external_q": result.coupling["physical"]["input_external_q"],
             "output_external_q": result.coupling["physical"]["output_external_q"],
+        },
+    }
+
+
+def evaluate_coupling_matrix(payload: dict[str, Any]) -> dict[str, Any]:
+    specification = FilterSpecification.from_payload(payload.get("specification") or payload)
+    matrix_payload = payload.get("matrix")
+    if isinstance(matrix_payload, dict):
+        values = matrix_payload.get("values")
+        labels = matrix_payload.get("labels")
+    else:
+        values = matrix_payload
+        labels = None
+    if not isinstance(values, list):
+        raise TypeError("matrix.values must be a two-dimensional array")
+    matrix = np.asarray(values, dtype=float)
+    expected_size = specification.order + 2
+    if matrix.shape != (expected_size, expected_size):
+        raise ValueError(
+            f"matrix must have shape {expected_size}x{expected_size} for order {specification.order}"
+        )
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("matrix values must be finite")
+    if not np.allclose(matrix, matrix.T, rtol=0.0, atol=1e-9):
+        raise ValueError("matrix must be symmetric")
+    frequencies_hz = np.linspace(
+        specification.start_ghz * 1e9,
+        specification.stop_ghz * 1e9,
+        specification.points,
+    )
+    effective_f0_hz = (specification.f0_ghz + specification.shift_mhz / 1_000.0) * 1e9
+    effective_bandwidth_hz = max(
+        specification.bandwidth_ghz + specification.delta_bandwidth_mhz / 1_000.0,
+        1e-9,
+    ) * 1e9
+    s11, s21, s22 = coupling_matrix_response(
+        matrix,
+        frequencies_hz,
+        filter_type=specification.filter_type,
+        f0_hz=effective_f0_hz,
+        bandwidth_hz=effective_bandwidth_hz,
+        unloaded_q=specification.unloaded_q,
+    )
+    angular_frequencies = 2.0 * np.pi * frequencies_hz
+    group_delay_ns = -np.gradient(np.unwrap(np.angle(s21)), angular_frequencies) * 1e9
+    s11_db = _to_db(s11)
+    s21_db = _to_db(s21)
+    s22_db = _to_db(s22)
+    center_index = int(np.argmin(np.abs(frequencies_hz - effective_f0_hz)))
+    return {
+        "status": 0,
+        "ok": True,
+        "engine": {
+            "name": "normalized-coupling-matrix",
+            "version": 1,
+            "simulated": False,
+        },
+        "matrix": {
+            "labels": labels or ["S", *[str(index) for index in range(1, specification.order + 1)], "L"],
+            "values": matrix.tolist(),
+        },
+        "series": {
+            "frequencies_ghz": _rounded(frequencies_hz / 1e9, 9),
+            "s11_db": _rounded(s11_db, 6),
+            "s21_db": _rounded(s21_db, 6),
+            "s22_db": _rounded(s22_db, 6),
+            "group_delay_ns": _rounded(group_delay_ns, 6),
+            "power_w": _rounded(specification.input_power_w * np.abs(s21) ** 2, 9),
+        },
+        "summary": {
+            "center_insertion_loss_db": float(abs(s21_db[center_index])),
+            "minimum_s11_db": float(np.min(s11_db)),
+            "minimum_s22_db": float(np.min(s22_db)),
+            "frequency_points": len(frequencies_hz),
         },
     }
 

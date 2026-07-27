@@ -14,6 +14,13 @@ O objetivo do projeto e fornecer uma base propria, documentada e testavel para:
 - sintetizar respostas BPF, BSF, LPF e multi-banda com NumPy/SciPy;
 - visualizar parametros S, atraso de grupo, potencia, matriz e topologia;
 - editar/exportar matriz e salvar/carregar projetos JSON.
+- sintetizar diplexers/multiplexers por canais;
+- gerar modelos parametricos de cavidade, combline, waveguide, planar, SIW e LPF;
+- executar jobs HFSS em fila com progresso e cancelamento;
+- adquirir `S11`, `S21`, `S12` e `S22` de VNAs reais;
+- comparar Touchstone de alvo, HFSS e VNA;
+- executar tuning, otimizacao, Monte Carlo e calculos de linhas;
+- persistir projetos com revisoes e reutilizar modelos da biblioteca.
 
 Este repositorio nao contem codigo fonte recuperado, nomes internos proprietarios,
 patches, binarios, licencas, credenciais ou assets de terceiros. A implementacao foi
@@ -23,14 +30,17 @@ escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 
 ## Status
 
-- Versao da aplicacao: `0.3.0`
+- Versao da aplicacao: `0.4.0`
 - Python: `>=3.14`
 - Servidor padrao: Flask + JavaScript local
 - API tecnica opcional: FastAPI
 - AEDT/HFSS: backend `pyaedt`, validado com AEDT 2026.1
 - Sintese: prototipos Chebyshev, Butterworth, Bessel e Elliptic
-- VNA: backend `pyvisa`
-- Superficie SymMatrix MVP: `/aedt/<method>`, `/hfss/<method>` e `POST /<method>`
+- VNA: backend `pyvisa`, duas portas completas e perfis Keysight/R&S/CMT
+- Superficie SymMatrix: `/aedt/<method>`, `/hfss/<method>` e `POST /<method>`
+- Modelagem: planos parametricos e execucao pelo Modeler PyAEDT
+- Analise: jobs HFSS serializados, consultaveis e cancelaveis
+- Projetos: armazenamento JSON atomico e historico de revisoes
 - Testes offline: backends `simulated`
 - Saida de rede: Touchstone `.s2p`
 - UI: workstation desktop responsiva, sem dependencias frontend externas
@@ -41,6 +51,7 @@ Validado localmente com:
 .\.venv\Scripts\python --version
 .\.venv\Scripts\python -m pytest
 .\.venv\Scripts\python -m ruff check .
+npm run test:ui
 ```
 
 ## Requisitos
@@ -51,6 +62,7 @@ Obrigatorios para desenvolvimento:
 - `uv`
 - Git
 - Python 3.14 gerenciado pelo `uv`
+- Node.js somente para executar os testes Playwright
 
 Obrigatorios para uso com AEDT/HFSS real:
 
@@ -86,6 +98,13 @@ Tambem ha um script equivalente:
 
 ```powershell
 .\scripts\setup.ps1 -WithHardware
+```
+
+Para os testes visuais:
+
+```powershell
+npm install
+npx playwright install chromium
 ```
 
 ## Executar
@@ -145,11 +164,15 @@ hfss_vna_bridge/
       vna/
     api/
     core/
+    engines/
     services/
     web/
     cli.py
     settings.py
   tests/
+    ui/
+  package.json
+  playwright.config.js
   pyproject.toml
   uv.lock
 ```
@@ -159,11 +182,21 @@ hfss_vna_bridge/
 Sintese:
 
 - `POST /api/synthesis/calculate`
+- `POST /api/synthesis/matrix-response`
+- `POST /api/synthesis/multiplexer`
+- `POST /api/engineering/optimize`
+- `POST /api/engineering/monte-carlo`
+- `POST /api/engineering/tuning`
+- `POST /api/engineering/transmission-line`
+- `POST /api/modeling/plan`
 
 VNA local:
 
-- `POST /status`
+- `GET /api/vna/resources`
+- `GET /api/vna/capabilities`
+- `GET /api/vna/errors`
 - `POST /connect`
+- `POST /close`
 - `POST /reset`
 - `POST /setfrequency`
 - `POST /setifbw`
@@ -182,12 +215,34 @@ AEDT/HFSS local:
 - `POST /aedt/setvariablesvalue`
 - `POST /aedt/evaluatedimension`
 - `POST /aedt/evaluatedimensionnos2p`
-- `POST /hfss/ping`
+- `POST /api/aedt/configureanalysis`
+- `POST /api/aedt/validatedesign`
+- `POST /api/aedt/exportresults`
+- `POST /api/aedt/stopanalysis`
 - `POST /hfss/openproject`
 - `POST /hfss/updatevalues`
 - `POST /hfss/analyzeall`
+- `POST /hfss/buildcavityfull3d`
+- `POST /hfss/ccsinglemodeling`
+- `POST /hfss/wgrsinglemodeling`
+- `POST /hfss/siwfull3d`
+- `POST /hfss/lpf_step_modeling`
 
-Endpoints reservados para o roadmap retornam `status=-501` com `implemented=false`.
+Dados e operacao:
+
+- `POST /api/touchstone/import`
+- `POST /api/analysis/compare`
+- `GET|POST /api/projects`
+- `GET|PUT|DELETE /api/projects/<id>`
+- `GET /api/projects/<id>/versions`
+- `POST /api/projects/<id>/restore/<revision>`
+- `GET /api/library`
+- `GET|POST /api/jobs`
+- `GET /api/jobs/<id>`
+- `POST /api/jobs/<id>/cancel`
+
+Os metodos publicados em `/health` possuem implementacao. Metodos desconhecidos
+retornam `status=-404`; nao ha endpoints anunciados que retornem `-501`.
 
 ## Endpoints REST Tambem Suportados
 
@@ -283,12 +338,18 @@ Invoke-RestMethod http://127.0.0.1:8765/aedt/variables `
   -Body '{"variables":{"arm_scale_a":1.02,"dist_refletor":"21mm"}}'
 ```
 
-Rodar analise e exportar Touchstone:
+Enfileirar analise e exportar Touchstone:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8765/aedt/analyze `
+Invoke-RestMethod http://127.0.0.1:8765/api/jobs `
   -Method Post -ContentType "application/json" `
   -Body '{"setup_name":"Setup1","sweep_name":"Sweep1","output_touchstone":"D:\\simulation\\hfss_export.s2p"}'
+```
+
+Consultar progresso:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/api/jobs
 ```
 
 ## Uso com VNA Real
@@ -298,7 +359,7 @@ Exemplo LAN/VISA:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/vna/connect `
   -Method Post -ContentType "application/json" `
-  -Body '{"backend":"pyvisa","resource":"TCPIP0::192.168.0.50::inst0::INSTR","timeout_ms":30000}'
+  -Body '{"backend":"pyvisa","brand":"KEYSIGHT","resource":"TCPIP0::192.168.0.50::inst0::INSTR","timeout_ms":30000,"channel":1}'
 ```
 
 Configurar e medir:
@@ -310,6 +371,9 @@ Invoke-RestMethod http://127.0.0.1:8765/vna/configure-sweep `
 
 Invoke-RestMethod http://127.0.0.1:8765/vna/single-sweep -Method Post
 ```
+
+A aquisicao real define e le dados complexos corrigidos de `S11`, `S21`, `S12`
+e `S22`. Os quatro parametros sao preservados na exportacao `.s2p`.
 
 Salvar Touchstone:
 
@@ -329,6 +393,8 @@ $env:HFSS_BRIDGE_AEDT_DESIGN = "HFSSDesign1"
 $env:HFSS_BRIDGE_AEDT_VERSION = "2026.1"
 $env:HFSS_BRIDGE_VNA_BACKEND = "simulated"
 $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
+$env:HFSS_BRIDGE_DATA_DIR = "data"
+$env:HFSS_BRIDGE_PROJECT_DIR = "data\projects"
 ```
 
 ## Testes e Qualidade
@@ -336,6 +402,8 @@ $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
 ```powershell
 .\.venv\Scripts\python -m pytest
 .\.venv\Scripts\python -m ruff check .
+npm run check:js
+npm run test:ui
 ```
 
 Os testes automatizados usam adaptadores simulados e mocks de contrato. A
@@ -350,6 +418,7 @@ validacao real do AEDT pode ser executada separadamente:
 ## Documentacao
 
 - [docs/setup.md](docs/setup.md): instalacao e ambiente.
+- [docs/full_functionality.md](docs/full_functionality.md): matriz funcional 0.4.0.
 - [docs/api_reference.md](docs/api_reference.md): referencia HTTP.
 - [docs/symmatrix_mvp.md](docs/symmatrix_mvp.md): matriz MVP SymMatrix.
 - [docs/professional_ui.md](docs/professional_ui.md): contrato detalhado da interface.

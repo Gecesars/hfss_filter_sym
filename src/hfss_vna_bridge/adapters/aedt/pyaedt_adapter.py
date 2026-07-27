@@ -272,9 +272,10 @@ class PyAedtAdapter:
         saved = hfss.save_project(file_name=output, overwrite=overwrite)
         if saved is False:
             raise RuntimeError("AEDT failed to save the project")
-        actual = output or Path(_project_file(hfss) or "")
-        if not actual:
+        actual_value: str | Path | None = output or _project_file(hfss)
+        if not actual_value:
             raise RuntimeError("AEDT saved the project but did not expose its path")
+        actual = Path(actual_value)
         self._project_path = actual
         self._state = AdapterState(
             True,
@@ -352,6 +353,164 @@ class PyAedtAdapter:
         if removed is False:
             raise RuntimeError("AEDT failed to remove the selected solution data")
         return True
+
+    def configure_analysis(self, config: dict[str, Any]) -> dict[str, Any]:
+        hfss = self._require_hfss()
+        setup_name = str(config.get("name") or "FilterSetup")
+        sweep_name = str(config.get("sweep_name") or "FilterSweep")
+        setups = list(hfss.get_setups())
+        setup = hfss.get_setup(setup_name) if setup_name in setups else hfss.create_setup(setup_name)
+        if setup is False:
+            raise RuntimeError(f"AEDT failed to create setup {setup_name!r}")
+        setup.props["Frequency"] = f"{float(config['center_frequency_ghz'])}GHz"
+        setup.props["MaximumPasses"] = int(config.get("maximum_passes", 12))
+        setup.props["MaxDeltaS"] = float(config.get("max_delta_s", 0.02))
+        if setup.update() is False:
+            raise RuntimeError(f"AEDT failed to update setup {setup_name!r}")
+
+        sweeps = list(hfss.get_sweeps(setup_name))
+        if sweep_name in sweeps:
+            sweep = setup.get_sweep(sweep_name)
+            if sweep is False:
+                raise RuntimeError(f"AEDT failed to access sweep {sweep_name!r}")
+            sweep.props["RangeStart"] = f"{float(config['start_frequency_ghz'])}GHz"
+            sweep.props["RangeEnd"] = f"{float(config['stop_frequency_ghz'])}GHz"
+            sweep.props["RangeCount"] = int(config.get("points", 401))
+            if sweep.update() is False:
+                raise RuntimeError(f"AEDT failed to update sweep {sweep_name!r}")
+        else:
+            sweep = hfss.create_linear_count_sweep(
+                setup=setup_name,
+                unit="GHz",
+                start_frequency=float(config["start_frequency_ghz"]),
+                stop_frequency=float(config["stop_frequency_ghz"]),
+                num_of_freq_points=int(config.get("points", 401)),
+                name=sweep_name,
+                sweep_type=str(config.get("sweep_type", "Interpolating")),
+            )
+            if sweep is False:
+                raise RuntimeError(f"AEDT failed to create sweep {sweep_name!r}")
+        return {
+            "configured": True,
+            "setup": setup_name,
+            "sweep": sweep_name,
+            "config": dict(config),
+        }
+
+    def build_model(self, plan: dict[str, Any]) -> dict[str, Any]:
+        hfss = self._require_hfss()
+        if plan.get("dry_run"):
+            return {
+                "built": False,
+                "dry_run": True,
+                "recipe": plan["recipe"],
+                "name": plan["name"],
+                "object_count": len(plan["objects"]),
+                "plan": plan,
+            }
+
+        modeler = hfss.modeler
+        modeler.model_units = str(plan.get("units") or "mm")
+        prefix = str(plan["name"])
+        if plan.get("overwrite", True):
+            existing = [
+                name
+                for name in list(getattr(modeler, "object_names", []))
+                if str(name).startswith(f"{prefix}_")
+            ]
+            if existing and modeler.delete(existing) is False:
+                raise RuntimeError(f"AEDT failed to replace existing model {prefix!r}")
+
+        objects: dict[str, Any] = {}
+        for primitive in plan["objects"]:
+            if primitive["primitive"] == "box":
+                created = modeler.create_box(
+                    origin=primitive["origin"],
+                    sizes=primitive["sizes"],
+                    name=primitive["name"],
+                    material=primitive["material"],
+                )
+            elif primitive["primitive"] == "cylinder":
+                created = modeler.create_cylinder(
+                    orientation=primitive["orientation"],
+                    origin=primitive["origin"],
+                    radius=primitive["radius"],
+                    height=primitive["height"],
+                    name=primitive["name"],
+                    material=primitive["material"],
+                )
+            else:
+                raise ValueError(f"Unsupported model primitive: {primitive['primitive']}")
+            if created is False:
+                raise RuntimeError(f"AEDT failed to create object {primitive['name']!r}")
+            objects[primitive["name"]] = created
+
+        for operation in plan.get("operations", []):
+            blank = objects[operation["blank"]]
+            tools = [objects[name] for name in operation.get("tools", [])]
+            if operation["operation"] == "subtract":
+                result = blank.subtract(
+                    tools,
+                    keep_originals=bool(operation.get("keep_originals", False)),
+                )
+            elif operation["operation"] == "unite":
+                result = blank.unite(tools)
+            else:
+                raise ValueError(f"Unsupported model operation: {operation['operation']}")
+            if result is False:
+                raise RuntimeError(
+                    f"AEDT failed to execute {operation['operation']} on {operation['blank']}"
+                )
+
+        ports = []
+        if plan.get("assign_ports", True):
+            for port in plan.get("ports", []):
+                boundary = hfss.lumped_port(
+                    assignment=objects[port["signal"]],
+                    reference=objects[port["reference"]],
+                    create_port_sheet=True,
+                    impedance=float(port.get("impedance", 50.0)),
+                    name=port["name"],
+                )
+                if boundary is False:
+                    raise RuntimeError(f"AEDT failed to assign port {port['name']!r}")
+                ports.append(getattr(boundary, "name", port["name"]))
+        setup = self.configure_analysis(plan["setup"])
+        try:
+            modeler.fit_all()
+        except (AttributeError, RuntimeError):
+            pass
+        return {
+            "built": True,
+            "dry_run": False,
+            "recipe": plan["recipe"],
+            "name": plan["name"],
+            "objects": list(objects),
+            "object_count": len(objects),
+            "ports": ports,
+            "setup": setup,
+        }
+
+    def validate_design(self, expected_ports: int | None = None) -> dict[str, Any]:
+        hfss = self._require_hfss()
+        messages, valid = hfss.validate_full_design(ports=expected_ports)
+        return {
+            "valid": bool(valid),
+            "messages": [str(message) for message in messages],
+            "expected_ports": expected_ports,
+        }
+
+    def export_results(self, output_dir: str | Path) -> list[str]:
+        hfss = self._require_hfss()
+        output = Path(output_dir).expanduser().resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        exported = hfss.export_results(export_folder=str(output))
+        return [str(Path(path).resolve()) for path in exported]
+
+    def stop_analysis(self, clean_stop: bool = True) -> bool:
+        hfss = self._require_hfss()
+        result = hfss.stop_simulations(clean_stop=clean_stop)
+        return bool(result is not False)
 
     def release(
         self,

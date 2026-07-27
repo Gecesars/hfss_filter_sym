@@ -1,6 +1,6 @@
 # Professional UI Contract
 
-Este documento descreve a interface web do HFSS Filter Studio 0.3.0 como um
+Este documento descreve a interface web do HFSS Filter Studio 0.4.0 como um
 contrato de produto. Mudancas futuras devem preservar a densidade operacional,
 a hierarquia e os fluxos descritos aqui.
 
@@ -221,6 +221,24 @@ O objeto `workspace` mantem:
 
 O estado de AEDT e VNA vem sempre de `GET /api/state`; o frontend nao assume que
 uma conexao permaneceu ativa depois de reiniciar o servidor.
+
+## Modulos Operacionais 0.4.0
+
+Todos os itens da navegacao abrem uma superficie executavel:
+
+- `Dip/MUX`: editor de canais e sintese composta;
+- `Cavity`: preview/construcao de cavity, combline e waveguide;
+- `Planar`: microstrip, SIW e LPFs distribuidos;
+- `CAT` e `Filter Tuning`: comparacao e recomendacoes por sensibilidade;
+- `Intelligent Optimization` e `Optimization`: busca global limitada;
+- `Monte Carlo`: tolerancias e yield;
+- `TL Calculator`: quatro familias de linha;
+- `Project Management`: projetos e revisoes no servidor;
+- `e-Library`: templates aplicaveis.
+
+O dialogo de integracao possui abas AEDT/HFSS, VNA, Jobs e Service Log.
+Modelagem abre em `Preview only`. Analise HFSS e enfileirada; o resultado S2P e
+importado no grafico apenas quando o job termina.
 
 ## Regras de Evolucao
 

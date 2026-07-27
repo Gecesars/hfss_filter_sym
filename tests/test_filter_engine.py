@@ -2,7 +2,10 @@ import math
 
 import pytest
 
-from hfss_vna_bridge.services.synthesis import synthesize_filter
+from hfss_vna_bridge.services.synthesis import (
+    evaluate_coupling_matrix,
+    synthesize_filter,
+)
 
 
 def test_chebyshev_engine_meets_return_loss_and_builds_physical_network() -> None:
@@ -106,3 +109,47 @@ def test_finite_transmission_zero_creates_requested_notch() -> None:
 
     assert result["series"]["s21_db"][index] < -75
     assert result["matrix"]["cross_couplings"]
+
+
+def test_edited_coupling_matrix_recalculates_a_passive_response() -> None:
+    specification = {
+        "filter_type": "BPF",
+        "response_family": "chebyshev",
+        "order": 4,
+        "return_loss_db": 25,
+        "f0_ghz": 1,
+        "bandwidth_ghz": 0.05,
+        "start_ghz": 0.9,
+        "stop_ghz": 1.1,
+        "points": 401,
+    }
+    synthesized = synthesize_filter(specification)
+    evaluated = evaluate_coupling_matrix(
+        {"specification": specification, "matrix": synthesized["matrix"]}
+    )
+
+    center = 200
+    assert evaluated["series"]["s11_db"][center] == pytest.approx(-25, abs=0.1)
+    for s11_db, s21_db in zip(
+        evaluated["series"]["s11_db"],
+        evaluated["series"]["s21_db"],
+        strict=True,
+    ):
+        assert 10 ** (s11_db / 10) + 10 ** (s21_db / 10) == pytest.approx(
+            1,
+            abs=2e-5,
+        )
+
+
+def test_coupling_matrix_response_rejects_asymmetric_matrix() -> None:
+    synthesized = synthesize_filter({"order": 2, "points": 101})
+    matrix = synthesized["matrix"]
+    matrix["values"][0][1] += 0.1
+
+    with pytest.raises(ValueError, match="symmetric"):
+        evaluate_coupling_matrix(
+            {
+                "specification": {"order": 2, "points": 101},
+                "matrix": matrix,
+            }
+        )

@@ -25,19 +25,19 @@ solver eletromagnetico nem o resultado medido em bancada.
 
 ## Estado por Modulo
 
-| Modulo | Estado 0.3.0 | Contrato atual | Proxima entrega |
-| --- | --- | --- | --- |
-| Synthesis / Single | Funcional | Prototipos reais, zeros, grafico, matriz, Qe e elementos | Sintese Cameron generalizada |
-| Synthesis / Dip-MUX | Planejado | Item de navegacao e tipo `MULTI` inicial | Canais, junction e composicao |
-| 3D Modeling / Cavity | Parcial | Rotas HFSS reservadas e AEDT funcional | Gerador parametrico de cavidade |
-| 3D Modeling / Planar | Parcial | Rotas HFSS reservadas e AEDT funcional | Microstrip, SIW e layout |
-| Optimization / CAT | Planejado | Evento e endpoint reservados | Ciclo modelo-medicao-ajuste |
-| Intelligent Optimization | Planejado | SocketIO reservado | Fila, objetivos e historico |
-| Test & Tuning | Parcial | VNA, sweep e overlay de S11 | Algoritmo de tuning por portas |
-| Monte Carlo | Planejado | Item de navegacao | Distribuicoes e yield |
-| TL Calculator | Planejado | Item de navegacao | Modelos de linha |
-| Project Management | Parcial | JSON local versionado | Persistencia no servidor |
-| e-Library | Planejado | Item de navegacao | Biblioteca de topologias |
+| Modulo | Estado 0.4.0 | Contrato atual |
+| --- | --- | --- |
+| Synthesis / Single | Funcional | Prototipos reais, zeros, grafico, matriz, Qe e elementos |
+| Synthesis / Dip-MUX | Funcional | Dois a dezesseis canais, resposta composta e topologia de junction |
+| 3D Modeling / Cavity | Funcional | Preview e construcao de cavity, combline e waveguide |
+| 3D Modeling / Planar | Funcional | Microstrip, SIW e quatro receitas de LPF |
+| Optimization / CAT | Funcional | Comparacao Touchstone e recomendacoes por sensibilidade |
+| Intelligent Optimization | Funcional | Differential evolution com limites, seed e historico |
+| Test & Tuning | Funcional | S11/S21 HFSS/VNA e acoes de sintonia |
+| Monte Carlo | Funcional | Tolerancias, limites, estatisticas e yield |
+| TL Calculator | Funcional | Microstrip, stripline, waveguide e SIW |
+| Project Management | Funcional | Persistencia atomica, revisoes e restauracao |
+| e-Library | Funcional | Templates de sintese e modelagem |
 
 ## Synthesis / Single
 
@@ -131,15 +131,19 @@ Controles:
 ```json
 {
   "format": "hfss-filter-studio-project",
-  "version": 1,
+  "version": 2,
   "saved_at": "2026-07-27T12:00:00.000Z",
   "specification": {},
-  "matrix": {}
+  "matrix": {},
+  "measurements": {"hfss": [], "vna": []}
 }
 ```
 
 `Load Data` aceita esse formato, restaura entradas, zeros, tipo, dispersao e
 matriz, e recalcula as series. Formatos desconhecidos sao recusados.
+
+`Project Management` persiste o mesmo dominio no servidor, atribui um ID,
+incrementa revisoes e permite restaurar qualquer versao anterior.
 
 ## Integracao AEDT/HFSS
 
@@ -150,7 +154,11 @@ O dialogo de integracao permite:
 - abrir/reusar sessao;
 - ler variaveis;
 - aplicar variaveis por JSON;
-- analisar e exportar Touchstone.
+- configurar setup e sweep;
+- validar o design;
+- enfileirar/cancelar analises;
+- criar modelos parametricos;
+- exportar Touchstone, convergencia e resultados.
 
 Rotas funcionais:
 
@@ -163,6 +171,10 @@ Rotas funcionais:
 - `setsettings`
 - `evaluatedimension`
 - `evaluatedimensionnos2p`
+- `configureanalysis`
+- `validatedesign`
+- `exportresults`
+- `stopanalysis`
 - `stop`
 
 ## Integracao VNA
@@ -171,15 +183,20 @@ O dialogo de integracao permite:
 
 - selecionar backend `simulated` ou `pyvisa`;
 - informar resource VISA e fabricante;
+- descobrir resources VISA;
 - configurar faixa a partir do projeto;
-- configurar pontos, IFBW e potencia;
+- configurar pontos, IFBW, potencia e tipo de sweep;
 - executar sweep unico;
-- adicionar a medicao ao grafico;
+- adquirir `S11`, `S21`, `S12` e `S22`;
+- adicionar overlays S11/S21 ao grafico;
 - salvar `.s2p`.
 
 Rotas funcionais:
 
 - `status`
+- `resources`
+- `capabilities`
+- `errors`
 - `connect`
 - `close`
 - `reset`
@@ -206,36 +223,23 @@ Rotas funcionais:
 - `endbackgroundsweep`
 - `exports2p`
 
-## Endpoints Reservados
+## Superficie Implementada
 
-Endpoints presentes no contrato e ainda sem implementacao retornam:
+Todos os metodos publicados por `GET /health` possuem handler. A superficie
+inclui report, convergencia, limpeza de malha, configuracao de setup, validacao,
+exportacao de resultados, simulacao em fila e todas as familias de modelagem
+listadas no contrato. Metodos desconhecidos retornam `status=-404`.
 
-```json
-{
-  "status": -501,
-  "ok": false,
-  "implemented": false
-}
-```
+A documentacao detalhada de cada modulo, limites e validacao esta em
+[`full_functionality.md`](full_functionality.md).
 
-Familias reservadas:
+## Limites de Engenharia
 
-- `aedt/createreport`
-- `aedt/makelpfmodel`
-- `aedt/callconvergence`
-- `aedt/callkillmesh`
-- `hfss/*simulation`
-- `hfss/*modeling`
-- `hfss/*couplingmodeling`
-- `hfss/*iomodeling`
-- `hfss/lpf_*_modeling`
-
-## Criterios para a Proxima Fase
-
-1. implementar sintese Cameron generalizada para matrizes com muitos zeros;
-2. importar Touchstone real no projeto;
-3. comparar alvo, HFSS e VNA no mesmo grafico;
-4. implementar fila de jobs AEDT com progresso e cancelamento;
-5. persistir projetos no servidor com historico;
-6. implementar tuning com objetivos, limites e rollback;
-7. adicionar testes de solve marcados para AEDT e instrumentos reais.
+1. zeros cruzados usam estimativa inicial de triplet; uma sintese Cameron
+   generalizada continua sendo um motor avancado separado;
+2. a composicao Dip/MUX fornece o ponto inicial dos canais e junction, enquanto
+   isolamento final depende do solve eletromagnetico;
+3. modelos de cavidade e planar sao parametricos, mas dimensoes e materiais
+   devem ser validados para o processo de fabricacao;
+4. tuning depende de sensibilidades mecanicas ou eletromagneticas fornecidas;
+5. testes automatizados nao consomem licenca AEDT nem conectam RF ao hardware.

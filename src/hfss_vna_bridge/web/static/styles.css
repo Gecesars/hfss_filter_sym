@@ -952,6 +952,14 @@ textarea:focus-visible {
   background: #aeb6bd;
 }
 
+.legend-line.hfss {
+  background: #7a4aa5;
+}
+
+.legend-line.vna {
+  background: #1e7554;
+}
+
 .matrix-panel {
   grid-template-rows: 38px 26px minmax(0, 1fr) 33px;
 }
@@ -1308,6 +1316,229 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
+.jobs-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.jobs-toolbar button {
+  min-height: 30px;
+}
+
+.job-list {
+  border-top: 1px solid #d2d6da;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: 120px 110px minmax(180px, 1fr) 110px 70px;
+  align-items: center;
+  min-height: 42px;
+  padding: 5px 8px;
+  border-bottom: 1px solid #d2d6da;
+  background: #fff;
+}
+
+.job-row.selected {
+  box-shadow: inset 3px 0 0 #087b96;
+  background: #eef6f8;
+}
+
+.job-progress {
+  height: 5px;
+  overflow: hidden;
+  background: #dfe3e6;
+}
+
+.job-progress span {
+  display: block;
+  height: 100%;
+  background: #159c88;
+}
+
+.module-dialog {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: none;
+  height: min(720px, calc(100vh - 44px));
+  max-height: none;
+  padding: 0;
+  border: 1px solid #737b84;
+  border-radius: 2px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.34);
+}
+
+.module-dialog::backdrop {
+  background: rgba(17, 23, 29, 0.46);
+}
+
+.module-dialog-shell {
+  display: grid;
+  grid-template-rows: 45px minmax(0, 1fr) 42px;
+  height: 100%;
+  background: #f3f4f5;
+}
+
+.module-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.module-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.42fr) minmax(380px, 0.58fr);
+  min-height: 100%;
+}
+
+.module-form {
+  display: grid;
+  align-content: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  padding: 15px;
+  border-right: 1px solid #d0d4d8;
+  background: #eceeef;
+}
+
+.module-form label {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  color: #5e6871;
+  font-size: 9px;
+}
+
+.module-form input,
+.module-form select,
+.module-form textarea {
+  width: 100%;
+  min-height: 31px;
+  padding: 5px 8px;
+  border: 1px solid #c8cdd1;
+  background: white;
+}
+
+.module-form textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+}
+
+.module-form .wide-field {
+  grid-column: 1 / -1;
+}
+
+.module-form .check-field {
+  display: flex;
+  align-items: center;
+  min-height: 31px;
+  padding: 0 8px;
+  color: #3f4a54;
+  border: 1px solid #c8cdd1;
+  background: #e2e5e7;
+}
+
+.module-form .check-field input {
+  width: 14px;
+  min-height: 14px;
+  margin-right: 7px;
+}
+
+.module-result {
+  min-width: 0;
+  padding: 15px;
+  overflow: auto;
+  background: white;
+}
+
+.module-result h3 {
+  margin: 0 0 10px;
+  color: #34414b;
+  font-size: 12px;
+}
+
+.module-result pre {
+  min-height: 260px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #c8d4de;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  background: #111820;
+  border: 1px solid #29333e;
+}
+
+.module-result table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+}
+
+.module-result th,
+.module-result td {
+  height: 31px;
+  padding: 5px 7px;
+  text-align: left;
+  border-bottom: 1px solid #dde0e3;
+}
+
+.module-result th {
+  color: #5d6973;
+  font-weight: 650;
+  background: #eef0f2;
+}
+
+.module-result tr.selected {
+  background: #e9f5f7;
+}
+
+.module-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-top: 1px solid #cbd0d4;
+  background: #e5e7e9;
+}
+
+.module-footer button {
+  min-width: 90px;
+  height: 30px;
+}
+
+.module-footer button.primary {
+  color: white;
+  background: #087b96;
+  border-color: #087b96;
+}
+
+.channel-editor {
+  grid-column: 1 / -1;
+  border-top: 1px solid #c9ced2;
+}
+
+.channel-row {
+  display: grid;
+  grid-template-columns: 54px repeat(4, minmax(55px, 1fr)) 28px;
+  gap: 4px;
+  align-items: center;
+  min-height: 38px;
+  border-bottom: 1px solid #d2d6d9;
+}
+
+.channel-row input {
+  min-width: 0;
+}
+
+.channel-row button {
+  width: 28px;
+  height: 28px;
+}
+
 .service-log {
   height: 100%;
   min-height: 410px;
@@ -1480,6 +1711,23 @@ textarea:focus-visible {
 
   .vna-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .module-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .module-form {
+    border-right: 0;
+    border-bottom: 1px solid #d0d4d8;
+  }
+
+  .job-row {
+    grid-template-columns: 90px 85px minmax(130px, 1fr);
+  }
+
+  .job-row > :nth-child(n + 4) {
+    display: none;
   }
 }
 

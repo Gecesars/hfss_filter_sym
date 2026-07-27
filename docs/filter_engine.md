@@ -1,6 +1,7 @@
 # Real Filter Engine
 
-O motor 0.3.0 substitui as curvas demonstrativas por uma cadeia numerica
+O motor introduzido em 0.3.0 e mantido em 0.4.0 substitui as curvas
+demonstrativas por uma cadeia numerica
 reprodutivel baseada em prototipos analogicos, transformacoes de frequencia,
 rede de duas portas e escalamento fisico.
 

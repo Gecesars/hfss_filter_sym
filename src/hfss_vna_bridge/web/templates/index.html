@@ -65,7 +65,7 @@
             </div>
           </div>
           <div class="version-block">
-            <span>Version 0.3.0</span>
+            <span>Version 0.4.0</span>
             <button class="sidebar-collapse" title="Collapse sidebar">&lt;&lt;</button>
           </div>
 
@@ -303,6 +303,14 @@
                   <span class="legend-line s22"></span>
                   Matrix - S22
                 </button>
+                <button class="legend-item active" data-series="hfss">
+                  <span class="legend-line hfss"></span>
+                  HFSS - S21
+                </button>
+                <button class="legend-item active" data-series="vna">
+                  <span class="legend-line vna"></span>
+                  VNA - S21
+                </button>
               </div>
             </section>
 
@@ -363,6 +371,7 @@
         <div class="integration-tabs">
           <button class="integration-tab active" data-integration-view="aedtView">AEDT / HFSS</button>
           <button class="integration-tab" data-integration-view="vnaView">VNA</button>
+          <button class="integration-tab" data-integration-view="jobsView">Jobs</button>
           <button class="integration-tab" data-integration-view="logView">Service Log</button>
         </div>
 
@@ -440,7 +449,10 @@
             <button id="openAedt">Open Project</button>
             <button id="loadVariables">Read Variables</button>
             <button id="setVariables">Apply Variables</button>
-            <button class="primary" id="evaluateAedt">Analyze &amp; Export</button>
+            <button id="configureAedt">Configure Setup</button>
+            <button id="validateAedt">Validate</button>
+            <button class="primary" id="evaluateAedt">Queue Analysis</button>
+            <button id="exportAedtResults">Export Results</button>
             <button id="releaseAedt">Release Session</button>
           </div>
           <textarea id="variablesJson" spellcheck="false">{"arm_scale_a":1.02,"dist_refletor":"21mm"}</textarea>
@@ -469,6 +481,22 @@
               </select>
             </label>
             <label>
+              Sweep type
+              <select id="vnaSweepType">
+                <option value="LIN">Linear</option>
+                <option value="LOG">Logarithmic</option>
+                <option value="SEGM">Segmented</option>
+              </select>
+            </label>
+            <label>
+              Channel
+              <input id="vnaChannel" type="number" min="1" value="1">
+            </label>
+            <label>
+              VISA library
+              <input id="vnaLibrary" placeholder="System default">
+            </label>
+            <label>
               Points
               <input id="vnaPoints" type="number" value="401">
             </label>
@@ -486,11 +514,22 @@
             </label>
           </div>
           <div class="integration-actions">
+            <button id="discoverVna">Discover</button>
             <button id="connectVna">Connect</button>
             <button id="applySweep">Configure Sweep</button>
             <button class="primary" id="singleSweep">Single Sweep</button>
             <button id="saveTrace">Save S2P</button>
+            <button id="inspectVna">Instrument Status</button>
+            <button id="closeVna">Close</button>
           </div>
+        </section>
+
+        <section class="integration-view" id="jobsView">
+          <div class="jobs-toolbar">
+            <button id="refreshJobs">Refresh Jobs</button>
+            <button id="cancelActiveJob">Cancel Selected</button>
+          </div>
+          <div class="job-list" id="jobList"></div>
         </section>
 
         <section class="integration-view" id="logView">
@@ -500,6 +539,26 @@
         <footer class="dialog-footer">
           <span id="dialogStatus">Local server ready</span>
           <a href="/health" target="_blank" rel="noreferrer">Open health JSON</a>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog class="module-dialog" id="moduleDialog">
+      <div class="module-dialog-shell">
+        <header class="dialog-header">
+          <div>
+            <strong id="moduleTitle">Engineering Module</strong>
+            <span id="moduleSubtitle">HFSS Filter Studio</span>
+          </div>
+          <button class="dialog-close" id="closeModule" title="Close">x</button>
+        </header>
+        <section class="module-body" id="moduleBody"></section>
+        <footer class="module-footer">
+          <span id="moduleStatus">Ready</span>
+          <div>
+            <button id="moduleSecondary">Refresh</button>
+            <button class="primary" id="moduleExecute">Run</button>
+          </div>
         </footer>
       </div>
     </dialog>

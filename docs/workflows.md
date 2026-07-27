@@ -77,14 +77,16 @@ Invoke-RestMethod http://127.0.0.1:8765/vna/single-sweep -Method Post
 
 Fluxo recomendado:
 
-1. Rodar AEDT e exportar `hfss_export.s2p`.
+1. Enfileirar AEDT em `POST /api/jobs` e exportar `hfss_export.s2p`.
 2. Rodar VNA e exportar `vna_measurement.s2p`.
-3. Comparar S11/S21 em script externo.
-4. Ajustar variaveis via `/aedt/variables`.
-5. Repetir analise e medicao.
+3. Comparar os quatro parametros em `POST /api/analysis/compare`.
+4. Calcular acoes em `POST /api/engineering/tuning`.
+5. Ajustar variaveis via `/aedt/variables`.
+6. Repetir analise e medicao mantendo o historico do projeto.
 
-Este repositorio ainda nao implementa o otimizador. A API foi desenhada para
-servir como base para esse proximo modulo.
+O otimizador analitico esta disponivel em `POST /api/engineering/optimize`. Ele
+nao inicia HFSS automaticamente; solves eletromagneticos permanecem serializados
+na fila de jobs.
 
 ## 5. Integracao com GUI ou Otimizador
 
@@ -93,7 +95,6 @@ Recomendacoes:
 - use `/health` antes de qualquer fluxo;
 - trate erros HTTP `409` como erro de estado ou configuracao;
 - trate erros HTTP `502` como erro de backend externo;
-- mantenha timeouts longos para `/aedt/analyze`;
+- use a fila `/api/jobs` para solves longos e consulte o estado;
 - salve Touchstone em pasta fora do repositorio, como `D:\simulation`;
 - nao rode multiplas analises AEDT concorrentes no mesmo processo.
-

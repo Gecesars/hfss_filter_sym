@@ -6,8 +6,26 @@ from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit
 
 from hfss_vna_bridge.core.registry import RuntimeRegistry
+from hfss_vna_bridge.core.touchstone import (
+    compare_networks,
+    points_from_json,
+    read_s2p,
+)
+from hfss_vna_bridge.engines.engineering import (
+    monte_carlo_filter,
+    optimize_filter_specification,
+    transmission_line,
+    tuning_recommendations,
+)
+from hfss_vna_bridge.services.library import get_library_entry, list_library
+from hfss_vna_bridge.services.modeling import model_plan
+from hfss_vna_bridge.services.multiplexer import synthesize_multiplexer
+from hfss_vna_bridge.services.project_store import ProjectStore
 from hfss_vna_bridge.services.symmatrix import SymMatrixDispatcher
-from hfss_vna_bridge.services.synthesis import synthesize_filter
+from hfss_vna_bridge.services.synthesis import (
+    evaluate_coupling_matrix,
+    synthesize_filter,
+)
 from hfss_vna_bridge.settings import Settings
 
 
@@ -20,6 +38,7 @@ def create_app(
     app.config["SETTINGS"] = settings or Settings.from_env()
     app.config["REGISTRY"] = registry or RuntimeRegistry.from_settings(app.config["SETTINGS"])
     app.config["DISPATCHER"] = SymMatrixDispatcher(app.config["REGISTRY"])
+    app.config["PROJECT_STORE"] = ProjectStore(app.config["SETTINGS"].project_dir)
 
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
     app.config["SOCKETIO"] = socketio
@@ -46,6 +65,152 @@ def create_app(
             return _json(synthesize_filter(_payload()))
         except (TypeError, ValueError) as exc:
             return _json({"status": -400, "ok": False, "message": str(exc)}, 400)
+
+    @app.post("/api/synthesis/multiplexer")
+    def api_synthesis_multiplexer():
+        return _service_call(synthesize_multiplexer, _payload())
+
+    @app.post("/api/synthesis/matrix-response")
+    def api_synthesis_matrix_response():
+        return _service_call(evaluate_coupling_matrix, _payload())
+
+    @app.post("/api/touchstone/import")
+    def api_touchstone_import():
+        path = str(_payload().get("path") or "").strip()
+        if not path:
+            return _json({"status": -400, "ok": False, "message": "path is required"}, 400)
+        try:
+            return _json({"status": 0, "ok": True, "touchstone": read_s2p(path).to_json()})
+        except (OSError, TypeError, ValueError) as exc:
+            return _json({"status": -400, "ok": False, "message": str(exc)}, 400)
+
+    @app.post("/api/analysis/compare")
+    def api_analysis_compare():
+        payload = _payload()
+        try:
+            reference = _network_from_payload(payload, "reference")
+            candidate = _network_from_payload(payload, "candidate")
+            return _json({"status": 0, "ok": True, "comparison": compare_networks(reference, candidate)})
+        except (OSError, TypeError, ValueError) as exc:
+            return _json({"status": -400, "ok": False, "message": str(exc)}, 400)
+
+    @app.post("/api/engineering/tuning")
+    def api_engineering_tuning():
+        payload = _payload()
+        return _service_call(
+            tuning_recommendations,
+            payload.get("target") or {},
+            payload.get("measured") or {},
+            sensitivities=payload.get("sensitivities"),
+        )
+
+    @app.post("/api/engineering/monte-carlo")
+    def api_engineering_monte_carlo():
+        return _service_call(monte_carlo_filter, _payload())
+
+    @app.post("/api/engineering/optimize")
+    def api_engineering_optimize():
+        return _service_call(optimize_filter_specification, _payload())
+
+    @app.post("/api/engineering/transmission-line")
+    def api_engineering_transmission_line():
+        return _service_call(transmission_line, _payload())
+
+    @app.post("/api/modeling/plan")
+    def api_modeling_plan():
+        payload = _payload()
+        method = str(payload.pop("method", "buildcavityfull3d"))
+        return _service_call(
+            lambda: {"status": 0, "ok": True, "plan": model_plan(method, payload)}
+        )
+
+    @app.route("/api/projects", methods=["GET", "POST"])
+    def api_projects():
+        store: ProjectStore = app.config["PROJECT_STORE"]
+        if request.method == "GET":
+            return _json({"status": 0, "ok": True, "projects": store.list_projects()})
+        return _service_call(
+            lambda payload: {"status": 0, "ok": True, "project": store.create(payload)},
+            _payload(),
+        )
+
+    @app.route("/api/projects/<project_id>", methods=["GET", "PUT", "DELETE"])
+    def api_project(project_id: str):
+        store: ProjectStore = app.config["PROJECT_STORE"]
+        try:
+            if request.method == "GET":
+                result = {"status": 0, "ok": True, "project": store.get(project_id)}
+            elif request.method == "PUT":
+                result = {
+                    "status": 0,
+                    "ok": True,
+                    "project": store.update(project_id, _payload()),
+                }
+            else:
+                result = {"status": 0, "ok": True, "deleted": store.delete(project_id)}
+            return _json(result)
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            return _json({"status": -404, "ok": False, "message": str(exc)}, 404)
+
+    @app.get("/api/projects/<project_id>/versions")
+    def api_project_versions(project_id: str):
+        store: ProjectStore = app.config["PROJECT_STORE"]
+        return _json({"status": 0, "ok": True, "versions": store.versions(project_id)})
+
+    @app.post("/api/projects/<project_id>/restore/<int:revision>")
+    def api_project_restore(project_id: str, revision: int):
+        store: ProjectStore = app.config["PROJECT_STORE"]
+        return _service_call(
+            lambda: {
+                "status": 0,
+                "ok": True,
+                "project": store.restore(project_id, revision),
+            }
+        )
+
+    @app.get("/api/library")
+    def api_library():
+        return _json(
+            {
+                "status": 0,
+                "ok": True,
+                "entries": list_library(request.args.get("category")),
+            }
+        )
+
+    @app.get("/api/library/<entry_id>")
+    def api_library_entry(entry_id: str):
+        return _service_call(
+            lambda: {"status": 0, "ok": True, "entry": get_library_entry(entry_id)}
+        )
+
+    @app.route("/api/jobs", methods=["GET", "POST"])
+    def api_jobs():
+        dispatcher: SymMatrixDispatcher = app.config["DISPATCHER"]
+        if request.method == "GET":
+            return _json({"status": 0, "ok": True, "jobs": dispatcher.list_jobs()})
+        return _service_call(
+            lambda payload: {
+                "status": 0,
+                "ok": True,
+                "job": dispatcher.submit_aedt_job(payload),
+            },
+            _payload(),
+        )
+
+    @app.get("/api/jobs/<job_id>")
+    def api_job(job_id: str):
+        dispatcher: SymMatrixDispatcher = app.config["DISPATCHER"]
+        return _service_call(
+            lambda: {"status": 0, "ok": True, "job": dispatcher.get_job(job_id)}
+        )
+
+    @app.post("/api/jobs/<job_id>/cancel")
+    def api_job_cancel(job_id: str):
+        dispatcher: SymMatrixDispatcher = app.config["DISPATCHER"]
+        return _service_call(
+            lambda: {"status": 0, "ok": True, "job": dispatcher.cancel_job(job_id)}
+        )
 
     @app.get("/ping")
     def ping():
@@ -108,30 +273,24 @@ def create_app(
 
     @socketio.on("deepOptimization")
     def deep_optimization(payload: dict[str, Any] | None = None) -> None:
-        emit(
-            "deepOptimization:status",
-            {
-                "status": -501,
-                "ok": False,
-                "implemented": False,
-                "event": "deepOptimization",
-                "payload": payload or {},
-            },
-        )
+        try:
+            result = optimize_filter_specification(payload or {})
+        except (TypeError, ValueError) as exc:
+            result = {"status": -400, "ok": False, "message": str(exc)}
+        emit("deepOptimization:status", result)
 
     @socketio.on("portTuning", namespace="/portTuning")
     def port_tuning(payload: dict[str, Any] | None = None) -> None:
-        emit(
-            "portTuning:status",
-            {
-                "status": -501,
-                "ok": False,
-                "implemented": False,
-                "event": "portTuning",
-                "payload": payload or {},
-            },
-            namespace="/portTuning",
-        )
+        data = payload or {}
+        try:
+            result = tuning_recommendations(
+                data.get("target") or {},
+                data.get("measured") or {},
+                sensitivities=data.get("sensitivities"),
+            )
+        except (TypeError, ValueError) as exc:
+            result = {"status": -400, "ok": False, "message": str(exc)}
+        emit("portTuning:status", result, namespace="/portTuning")
 
     @socketio.on("startTuning")
     def start_tuning(payload: dict[str, Any] | None = None) -> None:
@@ -181,5 +340,29 @@ def _dispatch(app: Flask, call):
         payload = call(dispatcher, _payload())
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
         payload = {"status": -500, "ok": False, "message": str(exc)}
-    status_code = 200 if int(payload.get("status", 0)) in {0, -501, -404} else 500
+    status_code = 200 if int(payload.get("status", 0)) in {0, -404} else 500
     return _json(payload, status_code)
+
+
+def _service_call(call, *args, **kwargs):
+    try:
+        result = call(*args, **kwargs)
+        if isinstance(result, dict):
+            return _json(result)
+        return _json({"status": 0, "ok": True, "result": result})
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        return _json({"status": -400, "ok": False, "message": str(exc)}, 400)
+
+
+def _network_from_payload(payload: dict[str, Any], key: str):
+    path = payload.get(f"{key}_path")
+    if path:
+        return read_s2p(str(path)).points
+    value = payload.get(key)
+    if isinstance(value, dict) and value.get("path"):
+        return read_s2p(str(value["path"])).points
+    if isinstance(value, dict):
+        value = value.get("points")
+    if not isinstance(value, list):
+        raise TypeError(f"{key} must provide a path or a points array")
+    return points_from_json(value)

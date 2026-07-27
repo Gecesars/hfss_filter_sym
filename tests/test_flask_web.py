@@ -1,3 +1,4 @@
+from hfss_vna_bridge.settings import Settings
 from hfss_vna_bridge.web.app import create_app
 
 
@@ -123,14 +124,16 @@ def test_symmatrix_aedt_compatibility_flow(tmp_path) -> None:
     assert output.exists()
 
 
-def test_symmatrix_hfss_planned_surface() -> None:
+def test_symmatrix_hfss_simulation_surface_is_implemented() -> None:
     app = create_app()
     client = app.test_client()
 
-    response = client.post("/hfss/full3dsimulation", json={})
+    client.post("/aedt/openproject", json={"backend": "simulated"})
+    response = client.post("/hfss/full3dsimulation", json={"async": True})
 
     assert response.status_code == 200
-    assert response.get_json()["status"] == -501
+    assert response.get_json()["status"] == 0
+    assert response.get_json()["job"]["kind"] == "aedt-analysis"
 
 
 def test_aedt_2026_operational_surface_in_simulation() -> None:
@@ -157,3 +160,30 @@ def test_aedt_2026_operational_surface_in_simulation() -> None:
     assert convergence["output_file"].endswith("convergence.conv")
     assert mesh["removed"] is True
     assert saved["project_path"] == "SIM::AEDT"
+
+
+def test_flask_full_product_services(tmp_path) -> None:
+    app = create_app(Settings(project_dir=tmp_path / "projects"))
+    client = app.test_client()
+
+    model = client.post(
+        "/api/modeling/plan",
+        json={"method": "buildcavityfull3d", "recipe": "cavity", "order": 4},
+    ).get_json()
+    project = client.post(
+        "/api/projects",
+        json={
+            "name": "Workbench Project",
+            "specification": {"filter_type": "BPF", "order": 4},
+        },
+    ).get_json()
+    library = client.get("/api/library").get_json()
+    line = client.post(
+        "/api/engineering/transmission-line",
+        json={"kind": "siw", "width_mm": 15, "via_diameter_mm": 0.8, "via_pitch_mm": 1.5},
+    ).get_json()
+
+    assert model["plan"]["recipe"] == "cavity"
+    assert project["project"]["revision"] == 1
+    assert library["entries"]
+    assert line["cutoff_te10_hz"] > 0

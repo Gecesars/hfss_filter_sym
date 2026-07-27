@@ -21,6 +21,61 @@ class FilterEngineResult:
     elements: list[dict[str, Any]]
 
 
+def coupling_matrix_response(
+    matrix: np.ndarray,
+    frequencies_hz: np.ndarray,
+    *,
+    filter_type: str,
+    f0_hz: float,
+    bandwidth_hz: float,
+    unloaded_q: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    values = np.asarray(matrix, dtype=float)
+    if values.ndim != 2 or values.shape[0] != values.shape[1]:
+        raise ValueError("coupling matrix must be square")
+    if values.shape[0] < 3:
+        raise ValueError("coupling matrix must contain source, resonator and load nodes")
+    if not np.allclose(values, values.T, rtol=0.0, atol=1e-9):
+        raise ValueError("coupling matrix must be symmetric")
+    frequencies = np.asarray(frequencies_hz, dtype=float)
+    if np.any(frequencies <= 0):
+        raise ValueError("frequencies must be greater than zero")
+
+    size = values.shape[0]
+    resonator_identity = np.diag([0.0, *([1.0] * (size - 2)), 0.0])
+    terminations = np.diag([1.0, *([0.0] * (size - 2)), 1.0])
+    normalized = _normalized_frequency(
+        filter_type,
+        frequencies,
+        f0_hz,
+        bandwidth_hz,
+    )
+    normalized_loss = (
+        0.0
+        if unloaded_q is None
+        else f0_hz / max(bandwidth_hz * unloaded_q, 1e-30)
+    )
+    s11 = np.empty(len(frequencies), dtype=np.complex128)
+    s21 = np.empty(len(frequencies), dtype=np.complex128)
+    s22 = np.empty(len(frequencies), dtype=np.complex128)
+    identity = np.eye(size, dtype=np.complex128)
+    for index, omega in enumerate(normalized):
+        system = (
+            values
+            - omega * resonator_identity
+            - 1j * terminations
+            - 1j * normalized_loss * resonator_identity
+        ).astype(np.complex128)
+        try:
+            inverse = np.linalg.solve(system, identity)
+        except np.linalg.LinAlgError:
+            inverse = np.linalg.pinv(system)
+        s11[index] = 1.0 + 2j * inverse[0, 0]
+        s21[index] = -2j * inverse[-1, 0]
+        s22[index] = 1.0 + 2j * inverse[-1, -1]
+    return s11, s21, s22
+
+
 def design_filter_network(
     *,
     filter_type: str,
@@ -463,6 +518,30 @@ def _bandpass_normalized_frequency(
 ) -> float:
     ratio = frequency_hz / f0_hz
     return (ratio - 1.0 / ratio) / (bandwidth_hz / f0_hz)
+
+
+def _normalized_frequency(
+    filter_type: str,
+    frequencies_hz: np.ndarray,
+    f0_hz: float,
+    bandwidth_hz: float,
+) -> np.ndarray:
+    key = filter_type.strip().upper()
+    if key in {"BPF", "MULTI"}:
+        ratio = frequencies_hz / f0_hz
+        return (ratio - 1.0 / ratio) / (bandwidth_hz / f0_hz)
+    if key == "BSF":
+        ratio = frequencies_hz / f0_hz
+        denominator = ratio - 1.0 / ratio
+        return np.divide(
+            bandwidth_hz / f0_hz,
+            denominator,
+            out=np.full_like(denominator, np.inf),
+            where=np.abs(denominator) > 1e-15,
+        )
+    if key == "LPF":
+        return frequencies_hz / f0_hz
+    raise ValueError("filter_type must be BPF, BSF, LPF, or MULTI")
 
 
 def _element(index: int, connection: str, kind: str, value: float) -> dict[str, Any]:

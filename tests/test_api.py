@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from hfss_vna_bridge.api.app import create_app
+from hfss_vna_bridge.settings import Settings
 
 
 def test_health_reports_simulated_defaults() -> None:
@@ -48,3 +49,30 @@ def test_simulated_aedt_variables_roundtrip() -> None:
     assert response.status_code == 200
     assert response.json()["arm_scale_a"] == "1.02"
 
+
+def test_fastapi_engineering_and_project_surfaces(tmp_path) -> None:
+    client = TestClient(create_app(Settings(project_dir=tmp_path / "projects")))
+
+    line = client.post(
+        "/engineering/transmission-line",
+        json={
+            "kind": "microstrip",
+            "width_mm": 2.9,
+            "height_mm": 1.6,
+            "epsilon_r": 4.4,
+            "frequency_ghz": 1,
+        },
+    )
+    project = client.post(
+        "/projects",
+        json={
+            "name": "API Project",
+            "specification": {"filter_type": "BPF", "order": 4},
+        },
+    )
+
+    assert line.status_code == 200
+    assert line.json()["impedance_ohm"] > 0
+    assert project.status_code == 200
+    project_id = project.json()["project"]["id"]
+    assert client.get(f"/projects/{project_id}").status_code == 200

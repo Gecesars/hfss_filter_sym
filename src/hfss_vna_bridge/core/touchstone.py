@@ -1,9 +1,35 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
+from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
+import numpy as np
+
 from .models import NetworkPoint
+
+
+@dataclass(frozen=True)
+class TouchstoneData:
+    path: Path
+    points: list[NetworkPoint]
+    reference_ohm: float
+    frequency_unit: str
+    data_format: str
+    comments: list[str]
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "path": str(self.path),
+            "reference_ohm": self.reference_ohm,
+            "frequency_unit": self.frequency_unit,
+            "data_format": self.data_format,
+            "comments": self.comments,
+            "points": [point.to_json() for point in self.points],
+            "metrics": network_metrics(self.points),
+        }
 
 
 def write_s2p(path: str | Path, points: Iterable[NetworkPoint], comment: str | None = None) -> Path:
@@ -27,3 +53,227 @@ def write_s2p(path: str | Path, points: Iterable[NetworkPoint], comment: str | N
             )
     return output
 
+
+def read_s2p(path: str | Path) -> TouchstoneData:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Touchstone file not found: {source}")
+    if source.suffix.lower() != ".s2p":
+        raise ValueError("Only two-port Touchstone .s2p files are supported")
+
+    comments: list[str] = []
+    option_tokens = ["GHZ", "S", "MA", "R", "50"]
+    numeric_tokens: list[str] = []
+    for raw_line in source.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("!"):
+            comments.append(line[1:].strip())
+            continue
+        data_part, _, inline_comment = line.partition("!")
+        if inline_comment.strip():
+            comments.append(inline_comment.strip())
+        data_part = data_part.strip()
+        if not data_part:
+            continue
+        if data_part.startswith("#"):
+            option_tokens = data_part[1:].upper().split()
+            continue
+        if data_part.startswith("["):
+            continue
+        numeric_tokens.extend(data_part.replace(",", " ").split())
+
+    unit, parameter, data_format, reference = _parse_options(option_tokens)
+    if parameter != "S":
+        raise ValueError(f"Unsupported Touchstone parameter type: {parameter}")
+    if len(numeric_tokens) % 9:
+        raise ValueError(
+            f"Invalid .s2p data: expected records with 9 values, got {len(numeric_tokens)} values"
+        )
+
+    scale = {"HZ": 1.0, "KHZ": 1e3, "MHZ": 1e6, "GHZ": 1e9}[unit]
+    points: list[NetworkPoint] = []
+    for offset in range(0, len(numeric_tokens), 9):
+        try:
+            values = [float(value.replace("D", "E").replace("d", "e")) for value in numeric_tokens[offset : offset + 9]]
+        except ValueError as exc:
+            raise ValueError(f"Invalid numeric value in Touchstone record {offset // 9 + 1}") from exc
+        complex_values = [
+            _pair_to_complex(values[index], values[index + 1], data_format)
+            for index in (1, 3, 5, 7)
+        ]
+        points.append(
+            NetworkPoint(
+                freq_hz=values[0] * scale,
+                s11=complex_values[0],
+                s21=complex_values[1],
+                s12=complex_values[2],
+                s22=complex_values[3],
+            )
+        )
+    if len(points) < 2:
+        raise ValueError("Touchstone file must contain at least two frequency points")
+    if any(right.freq_hz <= left.freq_hz for left, right in pairwise(points)):
+        raise ValueError("Touchstone frequencies must be strictly increasing")
+    return TouchstoneData(
+        path=source,
+        points=points,
+        reference_ohm=reference,
+        frequency_unit=unit,
+        data_format=data_format,
+        comments=comments,
+    )
+
+
+def network_metrics(points: Iterable[NetworkPoint]) -> dict[str, float | int | None]:
+    rows = list(points)
+    if not rows:
+        return {
+            "points": 0,
+            "start_hz": None,
+            "stop_hz": None,
+            "center_hz": None,
+            "minimum_s11_db": None,
+            "minimum_s21_db": None,
+            "peak_s21_db": None,
+            "bandwidth_3db_hz": None,
+        }
+    frequencies = np.asarray([point.freq_hz for point in rows], dtype=float)
+    s11_db = _complex_db([point.s11 for point in rows])
+    s21_db = _complex_db([point.s21 for point in rows])
+    peak_index = int(np.argmax(s21_db))
+    threshold = float(s21_db[peak_index] - 3.0)
+    mask = s21_db >= threshold
+    passband = frequencies[mask]
+    bandwidth = float(passband[-1] - passband[0]) if len(passband) >= 2 else 0.0
+    return {
+        "points": len(rows),
+        "start_hz": float(frequencies[0]),
+        "stop_hz": float(frequencies[-1]),
+        "center_hz": float(frequencies[peak_index]),
+        "minimum_s11_db": float(np.min(s11_db)),
+        "minimum_s21_db": float(np.min(s21_db)),
+        "peak_s21_db": float(s21_db[peak_index]),
+        "bandwidth_3db_hz": bandwidth,
+    }
+
+
+def compare_networks(
+    reference: Iterable[NetworkPoint],
+    candidate: Iterable[NetworkPoint],
+) -> dict[str, object]:
+    expected = list(reference)
+    actual = list(candidate)
+    if len(expected) < 2 or len(actual) < 2:
+        raise ValueError("Both networks must contain at least two points")
+    start_hz = max(expected[0].freq_hz, actual[0].freq_hz)
+    stop_hz = min(expected[-1].freq_hz, actual[-1].freq_hz)
+    if stop_hz <= start_hz:
+        raise ValueError("Touchstone datasets do not overlap in frequency")
+
+    reference_frequency = np.asarray([point.freq_hz for point in expected], dtype=float)
+    mask = (reference_frequency >= start_hz) & (reference_frequency <= stop_hz)
+    comparison_frequency = reference_frequency[mask]
+    if len(comparison_frequency) < 2:
+        comparison_frequency = np.linspace(start_hz, stop_hz, min(max(len(actual), 2), 2001))
+
+    reference_values = _interpolate_network(expected, comparison_frequency)
+    candidate_values = _interpolate_network(actual, comparison_frequency)
+    errors: dict[str, dict[str, float]] = {}
+    for parameter in ("s11", "s21", "s12", "s22"):
+        reference_db = _complex_db(reference_values[parameter])
+        candidate_db = _complex_db(candidate_values[parameter])
+        delta = candidate_db - reference_db
+        errors[parameter] = {
+            "rmse_db": float(np.sqrt(np.mean(delta**2))),
+            "mean_error_db": float(np.mean(delta)),
+            "maximum_absolute_error_db": float(np.max(np.abs(delta))),
+        }
+
+    reference_metrics = network_metrics(expected)
+    candidate_metrics = network_metrics(actual)
+    return {
+        "frequency": {
+            "start_hz": float(comparison_frequency[0]),
+            "stop_hz": float(comparison_frequency[-1]),
+            "points": len(comparison_frequency),
+        },
+        "errors": errors,
+        "reference": reference_metrics,
+        "candidate": candidate_metrics,
+        "center_shift_hz": _optional_difference(
+            candidate_metrics["center_hz"],
+            reference_metrics["center_hz"],
+        ),
+        "bandwidth_error_hz": _optional_difference(
+            candidate_metrics["bandwidth_3db_hz"],
+            reference_metrics["bandwidth_3db_hz"],
+        ),
+    }
+
+
+def points_from_json(values: Iterable[dict[str, object]]) -> list[NetworkPoint]:
+    points: list[NetworkPoint] = []
+    for value in values:
+        points.append(
+            NetworkPoint(
+                freq_hz=float(value["freq_hz"]),
+                s11=complex(float(value.get("s11_real", 0.0)), float(value.get("s11_imag", 0.0))),
+                s21=complex(float(value.get("s21_real", 0.0)), float(value.get("s21_imag", 0.0))),
+                s12=complex(float(value.get("s12_real", 0.0)), float(value.get("s12_imag", 0.0))),
+                s22=complex(float(value.get("s22_real", 0.0)), float(value.get("s22_imag", 0.0))),
+            )
+        )
+    return points
+
+
+def _parse_options(tokens: list[str]) -> tuple[str, str, str, float]:
+    unit = tokens[0] if tokens else "GHZ"
+    parameter = tokens[1] if len(tokens) > 1 else "S"
+    data_format = tokens[2] if len(tokens) > 2 else "MA"
+    if unit not in {"HZ", "KHZ", "MHZ", "GHZ"}:
+        raise ValueError(f"Unsupported Touchstone frequency unit: {unit}")
+    if data_format not in {"RI", "MA", "DB"}:
+        raise ValueError(f"Unsupported Touchstone data format: {data_format}")
+    reference = 50.0
+    if "R" in tokens:
+        index = tokens.index("R")
+        if index + 1 < len(tokens):
+            reference = float(tokens[index + 1])
+    return unit, parameter, data_format, reference
+
+
+def _pair_to_complex(first: float, second: float, data_format: str) -> complex:
+    if data_format == "RI":
+        return complex(first, second)
+    phase = math.radians(second)
+    magnitude = first if data_format == "MA" else 10.0 ** (first / 20.0)
+    return complex(magnitude * math.cos(phase), magnitude * math.sin(phase))
+
+
+def _complex_db(values: Iterable[complex]) -> np.ndarray:
+    return 20.0 * np.log10(np.maximum(np.abs(np.asarray(list(values), dtype=complex)), 1e-15))
+
+
+def _interpolate_network(
+    points: list[NetworkPoint],
+    frequencies: np.ndarray,
+) -> dict[str, np.ndarray]:
+    source_frequency = np.asarray([point.freq_hz for point in points], dtype=float)
+    result: dict[str, np.ndarray] = {}
+    for parameter in ("s11", "s21", "s12", "s22"):
+        source = np.asarray([getattr(point, parameter) for point in points], dtype=complex)
+        real = np.interp(frequencies, source_frequency, source.real)
+        imaginary = np.interp(frequencies, source_frequency, source.imag)
+        result[parameter] = real + 1j * imaginary
+    return result
+
+
+def _optional_difference(
+    left: float | None,
+    right: float | None,
+) -> float | None:
+    if left is None or right is None:
+        return None
+    return float(left) - float(right)

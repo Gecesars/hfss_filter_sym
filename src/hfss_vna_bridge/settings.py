@@ -14,6 +14,8 @@ class Settings:
     default_aedt_version: str = "2026.1"
     default_vna_backend: str = "simulated"
     default_vna_resource: str = "SIM::VNA"
+    data_dir: Path = Path("data")
+    project_dir: Path = Path("data/projects")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -26,4 +28,6 @@ class Settings:
             default_aedt_version=os.getenv("HFSS_BRIDGE_AEDT_VERSION", "2026.1"),
             default_vna_backend=os.getenv("HFSS_BRIDGE_VNA_BACKEND", "simulated"),
             default_vna_resource=os.getenv("HFSS_BRIDGE_VNA_RESOURCE", "SIM::VNA"),
+            data_dir=Path(os.getenv("HFSS_BRIDGE_DATA_DIR", "data")),
+            project_dir=Path(os.getenv("HFSS_BRIDGE_PROJECT_DIR", "data/projects")),
         )

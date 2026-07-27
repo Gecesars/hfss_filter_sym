@@ -1,0 +1,12 @@
+{
+  "name": "hfss-filter-studio-ui-tests",
+  "private": true,
+  "version": "0.4.0",
+  "scripts": {
+    "check:js": "node --check src/hfss_vna_bridge/web/static/app.js",
+    "test:ui": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}

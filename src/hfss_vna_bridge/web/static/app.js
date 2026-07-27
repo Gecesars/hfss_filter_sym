@@ -4,13 +4,18 @@ const workspace = {
   zeros: [],
   result: null,
   measurement: [],
+  hfssMeasurement: [],
   chartMode: "sparameter",
   chartFloor: -70,
-  visibleSeries: new Set(["s11", "s21"]),
+  visibleSeries: new Set(["s11", "s21", "hfss", "vna"]),
   markerEnabled: false,
   markerIndex: null,
   matrixEditing: false,
   selectedCell: null,
+  selectedJob: null,
+  activeModule: "single",
+  selectedProject: null,
+  selectedLibrary: null,
   dirty: true,
   toastTimer: null
 };
@@ -24,7 +29,7 @@ async function requestJson(path, options = {}) {
     ? await response.json()
     : {status: -500, ok: false, message: await response.text()};
   logService(`${options.method || "GET"} ${path}`, data);
-  if (!response.ok || data.ok === false && data.status !== -501) {
+  if (!response.ok || data.ok === false) {
     throw new Error(data.message || `Request failed with HTTP ${response.status}`);
   }
   return data;
@@ -264,6 +269,30 @@ function updateMatrixValue(row, column, value) {
   renderMatrix();
 }
 
+async function evaluateEditedMatrix() {
+  if (!workspace.result?.matrix) return;
+  try {
+    setOperation("Evaluating coupling matrix...");
+    const data = await postJson("/api/synthesis/matrix-response", {
+      specification: currentSpecification(),
+      matrix: workspace.result.matrix
+    });
+    workspace.result.series = data.series;
+    workspace.result.engine = data.engine;
+    workspace.result.summary = {
+      ...workspace.result.summary,
+      ...data.summary
+    };
+    drawChart();
+    renderSpecification();
+    setOperation("Coupling matrix response updated");
+    showToast("Matrix response updated");
+  } catch (error) {
+    setOperation(`Matrix evaluation failed: ${error.message}`);
+    showToast(error.message, true);
+  }
+}
+
 function renderSpecification() {
   const target = $("specificationList");
   const spec = workspace.result.specification;
@@ -354,12 +383,35 @@ function chartDefinition() {
   if (workspace.visibleSeries.has("s22")) {
     lines.push({key: "s22", values: series.s22_db, color: "#a7afb7", label: "Matrix - S22"});
   }
-  if (workspace.measurement.length) {
+  if (workspace.hfssMeasurement.length && workspace.visibleSeries.has("hfss")) {
     lines.push({
-      key: "measured",
-      values: interpolateMeasurement(series.frequencies_ghz),
+      key: "hfssS11",
+      values: interpolateNetwork(workspace.hfssMeasurement, series.frequencies_ghz, "s11_db"),
+      color: "#7a4aa5",
+      label: "HFSS - S11",
+      dashed: true
+    });
+    lines.push({
+      key: "hfssS21",
+      values: interpolateNetwork(workspace.hfssMeasurement, series.frequencies_ghz, "s21_db"),
+      color: "#ad76c5",
+      label: "HFSS - S21",
+      dashed: true
+    });
+  }
+  if (workspace.measurement.length && workspace.visibleSeries.has("vna")) {
+    lines.push({
+      key: "vnaS11",
+      values: interpolateNetwork(workspace.measurement, series.frequencies_ghz, "s11_db"),
       color: "#1e7554",
       label: "VNA - S11",
+      dashed: true
+    });
+    lines.push({
+      key: "vnaS21",
+      values: interpolateNetwork(workspace.measurement, series.frequencies_ghz, "s21_db"),
+      color: "#d4831d",
+      label: "VNA - S21",
       dashed: true
     });
   }
@@ -372,20 +424,20 @@ function chartDefinition() {
   };
 }
 
-function interpolateMeasurement(frequencies) {
-  if (!workspace.measurement.length) return [];
+function interpolateNetwork(network, frequencies, parameter) {
+  if (!network.length) return [];
   return frequencies.map((frequency) => {
     const targetHz = frequency * 1e9;
-    let best = workspace.measurement[0];
+    let best = network[0];
     let distance = Math.abs(best.freq_hz - targetHz);
-    for (const point of workspace.measurement) {
+    for (const point of network) {
       const nextDistance = Math.abs(point.freq_hz - targetHz);
       if (nextDistance < distance) {
         best = point;
         distance = nextDistance;
       }
     }
-    return best.s11_db;
+    return Number(best[parameter] ?? -300);
   });
 }
 
@@ -682,8 +734,8 @@ async function evaluateAedt() {
   try {
     const variables = JSON.parse($("variablesJson").value || "{}");
     const cores = numericValue("aedtCores", 0);
-    setOperation("Running AEDT analysis...");
-    const data = await postJson("/aedt/evaluatedimension", {
+    setOperation("Queueing AEDT analysis...");
+    const data = await postJson("/api/jobs", {
       variables,
       setup_name: $("aedtSetup").value.trim() || null,
       sweep_name: $("aedtSweep").value.trim() || null,
@@ -691,11 +743,55 @@ async function evaluateAedt() {
       cores: cores || null,
       blocking: true
     });
-    const result = data.result || {};
-    setOperation(`AEDT analysis completed: ${result.setup || "all setups"}`);
-    showToast(`Touchstone exported: ${result.touchstone || "not requested"}`);
+    workspace.selectedJob = data.job?.id || null;
+    activateIntegrationView("jobsView");
+    await refreshJobs();
+    setOperation(`AEDT job queued: ${workspace.selectedJob?.slice(0, 8) || "unknown"}`);
+    showToast("AEDT analysis queued");
+    if (workspace.selectedJob) pollJob(workspace.selectedJob);
   } catch (error) {
     setOperation(`AEDT error: ${error.message}`);
+    showToast(error.message, true);
+  }
+}
+
+async function configureAedt() {
+  try {
+    const payload = {
+      setup_name: $("aedtSetup").value.trim() || "FilterSetup",
+      sweep_name: $("aedtSweep").value.trim() || "FilterSweep",
+      f0_ghz: numericValue("f0Ghz", 1),
+      start_ghz: numericValue("startGhz", 0.875),
+      stop_ghz: numericValue("stopGhz", 1.125),
+      points: numericValue("vnaPoints", 401)
+    };
+    const data = await postJson("/api/aedt/configureanalysis", payload);
+    $("aedtSetup").value = data.configuration.setup;
+    $("aedtSweep").value = data.configuration.sweep;
+    setOperation(`Configured ${data.configuration.setup} : ${data.configuration.sweep}`);
+    showToast("HFSS setup configured");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function validateAedt() {
+  try {
+    const data = await postJson("/api/aedt/validatedesign", {expected_ports: 2});
+    logService("HFSS validation", data.validation);
+    setOperation(data.validation.valid ? "HFSS design is valid" : "HFSS validation reported issues");
+    showToast(data.validation.valid ? "Design validation passed" : "Review validation log", !data.validation.valid);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function exportAedtResults() {
+  try {
+    const data = await postJson("/api/aedt/exportresults", {output_dir: "data/hfss_results"});
+    setOperation(`Exported ${data.files.length} HFSS result files`);
+    showToast("HFSS results exported");
+  } catch (error) {
     showToast(error.message, true);
   }
 }
@@ -759,7 +855,9 @@ async function connectVna() {
   const payload = {
     backend,
     brand: backend === "simulated" ? "SIM" : $("vnaBrand").value,
-    resource: $("vnaResource").value.trim() || undefined
+    resource: $("vnaResource").value.trim() || undefined,
+    visa_library: $("vnaLibrary").value.trim() || undefined,
+    channel: numericValue("vnaChannel", 1)
   };
   try {
     setOperation("Connecting VNA...");
@@ -783,6 +881,7 @@ async function applySweep() {
     await postJson("/api/vna/setsweeppoints", {points: numericValue("vnaPoints", 401)});
     await postJson("/api/vna/setifbw", {ifbw_hz: numericValue("vnaIfbw", 1000)});
     await postJson("/api/vna/setpower", {power_dbm: numericValue("vnaPower", -10)});
+    await postJson("/api/vna/setsweeptype", {sweepType: $("vnaSweepType").value});
     setOperation("VNA sweep configured");
     showToast("Sweep configuration applied");
   } catch (error) {
@@ -817,13 +916,693 @@ async function saveTrace() {
   }
 }
 
+async function discoverVna() {
+  try {
+    const query = $("vnaLibrary").value.trim();
+    const path = query
+      ? `/api/vna/resources?visa_library=${encodeURIComponent(query)}`
+      : "/api/vna/resources";
+    const data = await getJson(path);
+    if (data.resources?.length) $("vnaResource").value = data.resources[0];
+    logService("VISA resources", data);
+    setOperation(`${data.count || 0} VISA resources detected`);
+    showToast(`${data.count || 0} VISA resources detected`);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function inspectVna() {
+  try {
+    const [capabilities, errors] = await Promise.all([
+      getJson("/api/vna/capabilities"),
+      getJson("/api/vna/errors")
+    ]);
+    logService("VNA capabilities", capabilities);
+    logService("VNA error queue", errors);
+    setOperation(`${capabilities.capabilities.profile_name || "VNA"} ready`);
+    showToast(errors.errors.length ? `${errors.errors.length} instrument errors` : "Instrument status ready", Boolean(errors.errors.length));
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function closeVna() {
+  try {
+    await postJson("/api/vna/close", {});
+    workspace.measurement = [];
+    await refreshState({quiet: true});
+    drawChart();
+    setOperation("VNA session closed");
+    showToast("VNA disconnected");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function refreshJobs() {
+  try {
+    const data = await getJson("/api/jobs");
+    renderJobs(data.jobs || []);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function renderJobs(jobs) {
+  const target = $("jobList");
+  target.textContent = "";
+  if (!jobs.length) {
+    target.textContent = "No jobs";
+    return;
+  }
+  jobs.forEach((job) => {
+    const row = document.createElement("button");
+    row.className = "job-row";
+    row.classList.toggle("selected", workspace.selectedJob === job.id);
+    row.type = "button";
+    row.innerHTML = `
+      <strong>${escapeHtml(job.id.slice(0, 8))}</strong>
+      <span>${escapeHtml(job.state)}</span>
+      <span>${escapeHtml(job.message || "")}</span>
+      <div class="job-progress"><span style="width:${Math.round((job.progress || 0) * 100)}%"></span></div>
+      <span>${Math.round((job.progress || 0) * 100)}%</span>
+    `;
+    row.addEventListener("click", () => {
+      workspace.selectedJob = job.id;
+      renderJobs(jobs);
+      logService(`Job ${job.id}`, job);
+    });
+    target.appendChild(row);
+  });
+}
+
+async function cancelActiveJob() {
+  if (!workspace.selectedJob) {
+    showToast("Select a job first", true);
+    return;
+  }
+  try {
+    await postJson(`/api/jobs/${workspace.selectedJob}/cancel`, {});
+    await refreshJobs();
+    setOperation("Job cancellation requested");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function pollJob(jobId) {
+  try {
+    const data = await getJson(`/api/jobs/${jobId}`);
+    const job = data.job;
+    await refreshJobs();
+    if (job.state === "completed") {
+      const path = job.result?.touchstone;
+      if (path) await importTouchstone(path, "hfss");
+      setOperation(`AEDT analysis completed: ${job.result?.setup || "setup"}`);
+      showToast("AEDT analysis completed");
+      return;
+    }
+    if (["failed", "cancelled"].includes(job.state)) {
+      setOperation(`AEDT job ${job.state}: ${job.error || job.message}`);
+      showToast(job.error || `AEDT job ${job.state}`, job.state === "failed");
+      return;
+    }
+    setTimeout(() => pollJob(jobId), 1500);
+  } catch (error) {
+    setOperation(`Job polling failed: ${error.message}`);
+  }
+}
+
+async function importTouchstone(path, target) {
+  const data = await postJson("/api/touchstone/import", {path});
+  const points = (data.touchstone.points || []).map((point) => ({
+    ...point,
+    s11_db: complexDb(point.s11_real, point.s11_imag),
+    s21_db: complexDb(point.s21_real, point.s21_imag),
+    s12_db: complexDb(point.s12_real, point.s12_imag),
+    s22_db: complexDb(point.s22_real, point.s22_imag)
+  }));
+  if (target === "hfss") workspace.hfssMeasurement = points;
+  else workspace.measurement = points;
+  drawChart();
+  return data.touchstone;
+}
+
+function complexDb(real, imaginary) {
+  return 20 * Math.log10(Math.max(Math.hypot(Number(real), Number(imaginary)), 1e-15));
+}
+
+const MODULES = {
+  dipmux: ["Diplexer / Multiplexer", "Multi-channel synthesis"],
+  cavity: ["Cavity Modeling", "Parametric HFSS geometry"],
+  planar: ["Planar Modeling", "Microstrip, SIW and distributed LPF"],
+  cat: ["Computer-Aided Tuning", "Measured response correction"],
+  intelligent: ["Intelligent Optimization", "Bounded global search"],
+  tuning: ["Filter Tuning", "Target and VNA alignment"],
+  montecarlo: ["Monte Carlo", "Tolerance and yield analysis"],
+  optimizer: ["Filter Optimization", "Specification objective search"],
+  tlcalculator: ["Transmission Line Calculator", "Guided-wave dimensions"],
+  projects: ["Project Management", "Versioned local repository"],
+  library: ["Engineering Library", "Reusable synthesis and model templates"]
+};
+
+async function openEngineeringModule(module) {
+  if (module === "single") {
+    $("moduleDialog").close();
+    return;
+  }
+  workspace.activeModule = module;
+  const [title, subtitle] = MODULES[module] || ["Engineering Module", "HFSS Filter Studio"];
+  $("moduleTitle").textContent = title;
+  $("moduleSubtitle").textContent = subtitle;
+  $("moduleStatus").textContent = "Ready";
+  $("moduleSecondary").textContent = "Refresh";
+  $("moduleExecute").textContent = "Run";
+  renderModule(module);
+  $("moduleDialog").showModal();
+  if (module === "projects") await loadServerProjects();
+  if (module === "library") await loadLibrary();
+}
+
+function renderModule(module) {
+  if (module === "dipmux") renderMultiplexerModule();
+  else if (["cavity", "planar"].includes(module)) renderModelingModule(module);
+  else if (["intelligent", "optimizer"].includes(module)) renderOptimizationModule();
+  else if (["cat", "tuning"].includes(module)) renderTuningModule();
+  else if (module === "montecarlo") renderMonteCarloModule();
+  else if (module === "tlcalculator") renderTransmissionLineModule();
+  else if (module === "projects") renderProjectsModule();
+  else if (module === "library") renderLibraryModule();
+}
+
+function moduleWorkspace(form) {
+  $("moduleBody").innerHTML = `
+    <div class="module-workspace">
+      <div class="module-form">${form}</div>
+      <div class="module-result">
+        <h3>Results</h3>
+        <pre id="moduleOutput">Ready</pre>
+      </div>
+    </div>
+  `;
+}
+
+function renderMultiplexerModule() {
+  moduleWorkspace(`
+    <label>Start (GHz)<input id="muxStart" type="number" value="${numericValue("startGhz", 0.875)}" step="0.001"></label>
+    <label>Stop (GHz)<input id="muxStop" type="number" value="${numericValue("stopGhz", 1.125)}" step="0.001"></label>
+    <label>Points<input id="muxPoints" type="number" value="801" min="101" max="4001"></label>
+    <label>Junction<select id="muxJunction"><option value="star">Star</option><option value="manifold">Manifold</option></select></label>
+    <div class="channel-editor" id="channelEditor"></div>
+    <button class="wide-field" id="addMuxChannel" type="button">Add Channel</button>
+  `);
+  [
+    {name: "CH1", f0: numericValue("f0Ghz", 1) - numericValue("bandwidthGhz", 0.05), bw: numericValue("bandwidthGhz", 0.05), order: 4},
+    {name: "CH2", f0: numericValue("f0Ghz", 1) + numericValue("bandwidthGhz", 0.05), bw: numericValue("bandwidthGhz", 0.05), order: 4}
+  ].forEach(addMuxChannel);
+  $("addMuxChannel").addEventListener("click", () => addMuxChannel());
+  $("moduleExecute").textContent = "Synthesize";
+}
+
+function addMuxChannel(values = {}) {
+  const editor = $("channelEditor");
+  const index = editor.children.length + 1;
+  const row = document.createElement("div");
+  row.className = "channel-row";
+  row.innerHTML = `
+    <input data-field="name" value="${escapeHtml(values.name || `CH${index}`)}" aria-label="Channel name">
+    <input data-field="f0" type="number" value="${values.f0 || 1}" step="0.001" aria-label="Center GHz">
+    <input data-field="bw" type="number" value="${values.bw || 0.05}" step="0.001" aria-label="Bandwidth GHz">
+    <input data-field="order" type="number" value="${values.order || 4}" min="1" max="12" aria-label="Order">
+    <input data-field="rl" type="number" value="${values.rl || 22}" step="0.1" aria-label="Return loss dB">
+    <button type="button" title="Remove channel">x</button>
+  `;
+  row.querySelector("button").addEventListener("click", () => {
+    if (editor.children.length > 2) row.remove();
+    else showToast("A multiplexer requires at least two channels", true);
+  });
+  editor.appendChild(row);
+}
+
+function renderModelingModule(module) {
+  const cavity = module === "cavity";
+  moduleWorkspace(`
+    <label>Recipe
+      <select id="modelRecipe">
+        ${cavity
+          ? '<option value="cavity">Cavity</option><option value="combline">Combline</option><option value="waveguide">Waveguide</option>'
+          : '<option value="planar">Microstrip</option><option value="siw">SIW</option><option value="lpf_step">Stepped LPF</option><option value="lpf_open_stub">Open-stub LPF</option><option value="lpf_elliptic">Elliptic LPF</option>'}
+      </select>
+    </label>
+    <label>Model name<input id="modelName" value="${cavity ? "CavityFilter" : "PlanarFilter"}"></label>
+    <label>Order<input id="modelOrder" type="number" min="1" max="24" value="${numericValue("filterOrder", 4)}"></label>
+    <label>Length (mm)<input id="modelLength" type="number" value="${cavity ? 120 : 100}" step="0.1"></label>
+    <label>${cavity ? "Width" : "Board width"} (mm)<input id="modelWidth" type="number" value="${cavity ? 50 : 40}" step="0.1"></label>
+    <label>${cavity ? "Height" : "Substrate height"} (mm)<input id="modelHeight" type="number" value="${cavity ? 25 : 1.524}" step="0.001"></label>
+    <label>Setup<input id="modelSetup" value="FilterSetup"></label>
+    <label>Sweep<input id="modelSweep" value="FilterSweep"></label>
+    <label class="check-field"><input id="modelDryRun" type="checkbox" checked>Preview only</label>
+    <label class="check-field"><input id="modelPorts" type="checkbox" checked>Assign two ports</label>
+  `);
+  $("moduleSecondary").textContent = "Preview";
+  $("moduleExecute").textContent = "Build Model";
+}
+
+function renderOptimizationModule() {
+  moduleWorkspace(`
+    <label>Iterations<input id="optimizationIterations" type="number" min="1" max="200" value="12"></label>
+    <label>Population<input id="optimizationPopulation" type="number" min="4" max="30" value="8"></label>
+    <label>Target center (GHz)<input id="optimizationCenter" type="number" value="${numericValue("f0Ghz", 1)}" step="0.001"></label>
+    <label>Target bandwidth (GHz)<input id="optimizationBandwidth" type="number" value="${numericValue("bandwidthGhz", 0.05)}" step="0.001"></label>
+    <label>Target return loss (dB)<input id="optimizationReturn" type="number" value="${numericValue("returnLoss", 25)}" step="0.1"></label>
+    <label>Maximum IL (dB)<input id="optimizationInsertion" type="number" value="1" step="0.1"></label>
+    <label class="wide-field">Variable bounds
+      <textarea id="optimizationBounds">{
+  "f0_ghz": [${(numericValue("f0Ghz", 1) * 0.95).toFixed(6)}, ${(numericValue("f0Ghz", 1) * 1.05).toFixed(6)}],
+  "bandwidth_ghz": [${(numericValue("bandwidthGhz", 0.05) * 0.7).toFixed(6)}, ${(numericValue("bandwidthGhz", 0.05) * 1.3).toFixed(6)}],
+  "return_loss_db": [15, 35]
+}</textarea>
+    </label>
+  `);
+  $("moduleExecute").textContent = "Optimize";
+}
+
+function renderTuningModule() {
+  moduleWorkspace(`
+    <label>Frequency sensitivity (MHz/turn)<input id="tuneFrequencySensitivity" type="number" value="2" step="0.1"></label>
+    <label>Bandwidth sensitivity (MHz/turn)<input id="tuneBandwidthSensitivity" type="number" value="1" step="0.1"></label>
+    <label>Return-loss sensitivity (dB/turn)<input id="tuneReturnSensitivity" type="number" value="1" step="0.1"></label>
+    <label>Measurement source<select id="tuneSource"><option value="vna">VNA acquisition</option><option value="hfss">HFSS result</option></select></label>
+    <label class="wide-field">Reference Touchstone<input id="tuneReferencePath" value="data\\hfss_export.s2p"></label>
+    <label class="wide-field">Candidate Touchstone<input id="tuneCandidatePath" value="data\\vna_measurement.s2p"></label>
+  `);
+  $("moduleSecondary").textContent = "Compare Files";
+  $("moduleExecute").textContent = "Calculate Tuning";
+}
+
+function renderMonteCarloModule() {
+  moduleWorkspace(`
+    <label>Samples<input id="mcSamples" type="number" min="10" max="10000" value="250"></label>
+    <label>Seed<input id="mcSeed" type="number" value="2026"></label>
+    <label>F0 sigma (%)<input id="mcF0" type="number" value="0.2" step="0.01"></label>
+    <label>BW sigma (%)<input id="mcBw" type="number" value="3" step="0.1"></label>
+    <label>RL sigma (dB)<input id="mcRl" type="number" value="0.5" step="0.1"></label>
+    <label>Q sigma (%)<input id="mcQ" type="number" value="5" step="0.1"></label>
+    <label>Minimum RL (dB)<input id="mcMinRl" type="number" value="${Math.max(1, numericValue("returnLoss", 25) - 3)}"></label>
+    <label>Maximum IL (dB)<input id="mcMaxIl" type="number" value="1.5" step="0.1"></label>
+  `);
+  $("moduleExecute").textContent = "Run Yield";
+}
+
+function renderTransmissionLineModule() {
+  moduleWorkspace(`
+    <label>Line type
+      <select id="tlKind">
+        <option value="microstrip">Microstrip</option>
+        <option value="stripline">Stripline</option>
+        <option value="rectangular_waveguide">Rectangular waveguide</option>
+        <option value="siw">SIW</option>
+      </select>
+    </label>
+    <label>Frequency (GHz)<input id="tlFrequency" type="number" value="${numericValue("f0Ghz", 1)}" step="0.001"></label>
+    <label>Width / a (mm)<input id="tlWidth" type="number" value="2.9" step="0.001"></label>
+    <label>Height / b (mm)<input id="tlHeight" type="number" value="1.6" step="0.001"></label>
+    <label>Relative permittivity<input id="tlEr" type="number" value="4.4" step="0.01"></label>
+    <label>Conductor thickness (mm)<input id="tlThickness" type="number" value="0.035" step="0.001"></label>
+    <label>Via diameter (mm)<input id="tlViaDiameter" type="number" value="0.8" step="0.01"></label>
+    <label>Via pitch (mm)<input id="tlViaPitch" type="number" value="1.5" step="0.01"></label>
+  `);
+  $("moduleExecute").textContent = "Calculate";
+}
+
+function renderProjectsModule() {
+  moduleWorkspace(`
+    <label class="wide-field">Project name<input id="serverProjectName" value="Filter Project"></label>
+    <label class="wide-field">Description<textarea id="serverProjectDescription"></textarea></label>
+  `);
+  $("moduleExecute").textContent = "Save Revision";
+}
+
+function renderLibraryModule() {
+  moduleWorkspace(`
+    <label>Category
+      <select id="libraryCategory">
+        <option value="">All</option>
+        <option value="synthesis">Synthesis</option>
+        <option value="cavity">Cavity</option>
+        <option value="planar">Planar</option>
+      </select>
+    </label>
+  `);
+  $("libraryCategory").addEventListener("change", loadLibrary);
+  $("moduleExecute").textContent = "Use Selected";
+}
+
+async function runActiveModule() {
+  const module = workspace.activeModule;
+  try {
+    setModuleStatus("Running...");
+    let data;
+    if (module === "dipmux") data = await runMultiplexer();
+    else if (["cavity", "planar"].includes(module)) data = await runModeling(false);
+    else if (["intelligent", "optimizer"].includes(module)) data = await runOptimization();
+    else if (["cat", "tuning"].includes(module)) data = await runTuning();
+    else if (module === "montecarlo") data = await runMonteCarlo();
+    else if (module === "tlcalculator") data = await runTransmissionLine();
+    else if (module === "projects") data = await saveServerProject();
+    else if (module === "library") data = await useLibraryEntry();
+    if (data) setModuleOutput(data);
+    setModuleStatus("Completed");
+  } catch (error) {
+    setModuleStatus(error.message);
+    showToast(error.message, true);
+  }
+}
+
+async function refreshActiveModule() {
+  const module = workspace.activeModule;
+  if (["cavity", "planar"].includes(module)) {
+    const data = await runModeling(true);
+    setModuleOutput(data);
+  } else if (["cat", "tuning"].includes(module)) {
+    const reference = $("tuneReferencePath").value.trim();
+    const candidate = $("tuneCandidatePath").value.trim();
+    const data = await postJson("/api/analysis/compare", {
+      reference_path: reference,
+      candidate_path: candidate
+    });
+    setModuleOutput(data);
+  } else if (module === "projects") await loadServerProjects();
+  else if (module === "library") await loadLibrary();
+  else setModuleOutput({status: 0, specification: currentSpecification()});
+}
+
+async function runMultiplexer() {
+  const channels = [...document.querySelectorAll(".channel-row")].map((row) => ({
+    name: row.querySelector('[data-field="name"]').value,
+    f0_ghz: Number(row.querySelector('[data-field="f0"]').value),
+    bandwidth_ghz: Number(row.querySelector('[data-field="bw"]').value),
+    order: Number(row.querySelector('[data-field="order"]').value),
+    return_loss_db: Number(row.querySelector('[data-field="rl"]').value)
+  }));
+  return postJson("/api/synthesis/multiplexer", {
+    channels,
+    start_ghz: numericValue("muxStart", 0.8),
+    stop_ghz: numericValue("muxStop", 1.2),
+    points: numericValue("muxPoints", 801),
+    junction: $("muxJunction").value
+  });
+}
+
+function modelingPayload(preview) {
+  const cavity = workspace.activeModule === "cavity";
+  return {
+    method: cavity ? "buildcavityfull3d" : "planarupdatemodel",
+    recipe: $("modelRecipe").value,
+    name: $("modelName").value,
+    order: numericValue("modelOrder", 4),
+    length_mm: numericValue("modelLength", cavity ? 120 : 100),
+    width_mm: numericValue("modelWidth", 50),
+    board_width_mm: numericValue("modelWidth", 40),
+    height_mm: numericValue("modelHeight", 25),
+    substrate_height_mm: numericValue("modelHeight", 1.524),
+    setup_name: $("modelSetup").value,
+    sweep_name: $("modelSweep").value,
+    f0_ghz: numericValue("f0Ghz", 1),
+    start_ghz: numericValue("startGhz", 0.875),
+    stop_ghz: numericValue("stopGhz", 1.125),
+    points: 401,
+    dry_run: preview || $("modelDryRun").checked,
+    assign_ports: $("modelPorts").checked
+  };
+}
+
+async function runModeling(preview) {
+  const payload = modelingPayload(preview);
+  if (payload.dry_run) return postJson("/api/modeling/plan", payload);
+  return postJson(`/api/hfss/${payload.method}`, payload);
+}
+
+async function runOptimization() {
+  return postJson("/api/engineering/optimize", {
+    specification: currentSpecification(),
+    targets: {
+      center_ghz: numericValue("optimizationCenter", 1),
+      bandwidth_ghz: numericValue("optimizationBandwidth", 0.05),
+      return_loss_db: numericValue("optimizationReturn", 25),
+      maximum_insertion_loss_db: numericValue("optimizationInsertion", 1)
+    },
+    variables: JSON.parse($("optimizationBounds").value),
+    max_iterations: numericValue("optimizationIterations", 12),
+    population: numericValue("optimizationPopulation", 8)
+  });
+}
+
+async function runTuning() {
+  const source = $("tuneSource").value === "hfss"
+    ? workspace.hfssMeasurement
+    : workspace.measurement;
+  if (!source.length) {
+    throw new Error("Acquire or import a candidate response first");
+  }
+  return postJson("/api/engineering/tuning", {
+    target: {
+      center_hz: numericValue("f0Ghz", 1) * 1e9,
+      bandwidth_3db_hz: numericValue("bandwidthGhz", 0.05) * 1e9,
+      minimum_s11_db: -numericValue("returnLoss", 25)
+    },
+    measured: networkMetrics(source),
+    sensitivities: {
+      frequency_hz_per_turn: numericValue("tuneFrequencySensitivity", 2) * 1e6,
+      bandwidth_hz_per_turn: numericValue("tuneBandwidthSensitivity", 1) * 1e6,
+      return_loss_db_per_turn: numericValue("tuneReturnSensitivity", 1)
+    }
+  });
+}
+
+async function runMonteCarlo() {
+  return postJson("/api/engineering/monte-carlo", {
+    specification: currentSpecification(),
+    samples: numericValue("mcSamples", 250),
+    seed: numericValue("mcSeed", 2026),
+    tolerances: {
+      f0_relative: numericValue("mcF0", 0.2) / 100,
+      bandwidth_relative: numericValue("mcBw", 3) / 100,
+      return_loss_db: numericValue("mcRl", 0.5),
+      unloaded_q_relative: numericValue("mcQ", 5) / 100
+    },
+    limits: {
+      minimum_return_loss_db: numericValue("mcMinRl", 22),
+      maximum_insertion_loss_db: numericValue("mcMaxIl", 1.5)
+    }
+  });
+}
+
+async function runTransmissionLine() {
+  const kind = $("tlKind").value;
+  return postJson("/api/engineering/transmission-line", {
+    kind,
+    frequency_ghz: numericValue("tlFrequency", 1),
+    width_mm: numericValue("tlWidth", 2.9),
+    height_mm: numericValue("tlHeight", 1.6),
+    spacing_mm: numericValue("tlHeight", 1.6),
+    a_mm: numericValue("tlWidth", 22.86),
+    b_mm: numericValue("tlHeight", 10.16),
+    epsilon_r: numericValue("tlEr", 4.4),
+    thickness_mm: numericValue("tlThickness", 0.035),
+    via_diameter_mm: numericValue("tlViaDiameter", 0.8),
+    via_pitch_mm: numericValue("tlViaPitch", 1.5)
+  });
+}
+
+async function saveServerProject() {
+  const payload = {
+    name: $("serverProjectName").value.trim() || "Filter Project",
+    description: $("serverProjectDescription").value,
+    specification: currentSpecification(),
+    matrix: workspace.result?.matrix || null,
+    measurements: {
+      hfss_points: workspace.hfssMeasurement.length,
+      vna_points: workspace.measurement.length
+    }
+  };
+  const data = workspace.selectedProject
+    ? await requestJson(`/api/projects/${workspace.selectedProject}`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload)
+    })
+    : await postJson("/api/projects", payload);
+  workspace.selectedProject = data.project.id;
+  await loadServerProjects();
+  setDirty(false);
+  return data;
+}
+
+async function loadServerProjects() {
+  const data = await getJson("/api/projects");
+  const result = document.querySelector(".module-result");
+  result.innerHTML = `
+    <h3>Projects</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Revision</th><th>Type</th><th>Order</th><th>Updated</th><th></th></tr></thead>
+      <tbody id="projectRows"></tbody>
+    </table>
+  `;
+  const rows = $("projectRows");
+  (data.projects || []).forEach((project) => {
+    const row = document.createElement("tr");
+    row.classList.toggle("selected", workspace.selectedProject === project.id);
+    row.innerHTML = `
+      <td>${escapeHtml(project.name)}</td><td>${project.revision}</td>
+      <td>${escapeHtml(project.filter_type || "")}</td><td>${project.order || ""}</td>
+      <td>${escapeHtml(formatTimestamp(project.updated_at))}</td>
+      <td><button data-load>Load</button> <button data-delete>Delete</button></td>
+    `;
+    row.addEventListener("click", () => {
+      workspace.selectedProject = project.id;
+      $("serverProjectName").value = project.name;
+      document.querySelectorAll("#projectRows tr").forEach((item) => item.classList.remove("selected"));
+      row.classList.add("selected");
+    });
+    row.querySelector("[data-load]").addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await loadServerProject(project.id);
+    });
+    row.querySelector("[data-delete]").addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await requestJson(`/api/projects/${project.id}`, {method: "DELETE"});
+      if (workspace.selectedProject === project.id) workspace.selectedProject = null;
+      await loadServerProjects();
+    });
+    rows.appendChild(row);
+  });
+  setModuleStatus(`${data.projects.length} projects`);
+}
+
+async function loadServerProject(projectId) {
+  const data = await getJson(`/api/projects/${projectId}`);
+  const project = data.project;
+  workspace.selectedProject = project.id;
+  applySpecification(project.specification || {});
+  await calculateAll({quiet: true});
+  if (project.matrix && workspace.result) {
+    workspace.result.matrix = project.matrix;
+    renderMatrix();
+  }
+  $("serverProjectName").value = project.name;
+  $("serverProjectDescription").value = project.description || "";
+  setDirty(false);
+  $("moduleDialog").close();
+  showToast(`Loaded ${project.name}`);
+}
+
+async function loadLibrary() {
+  const category = $("libraryCategory")?.value || "";
+  const data = await getJson(category ? `/api/library?category=${encodeURIComponent(category)}` : "/api/library");
+  const result = document.querySelector(".module-result");
+  result.innerHTML = `
+    <h3>Library</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Category</th><th>Description</th><th></th></tr></thead>
+      <tbody id="libraryRows"></tbody>
+    </table>
+  `;
+  const rows = $("libraryRows");
+  data.entries.forEach((entry) => {
+    const row = document.createElement("tr");
+    row.classList.toggle("selected", workspace.selectedLibrary === entry.id);
+    row.innerHTML = `
+      <td>${escapeHtml(entry.name)}</td><td>${escapeHtml(entry.category)}</td>
+      <td>${escapeHtml(entry.description)}</td><td><button data-use>Use</button></td>
+    `;
+    row.addEventListener("click", () => {
+      workspace.selectedLibrary = entry.id;
+      document.querySelectorAll("#libraryRows tr").forEach((item) => item.classList.remove("selected"));
+      row.classList.add("selected");
+    });
+    row.querySelector("[data-use]").addEventListener("click", async (event) => {
+      event.stopPropagation();
+      workspace.selectedLibrary = entry.id;
+      await useLibraryEntry();
+    });
+    rows.appendChild(row);
+  });
+  setModuleStatus(`${data.entries.length} library entries`);
+}
+
+async function useLibraryEntry() {
+  if (!workspace.selectedLibrary) throw new Error("Select a library entry first");
+  const data = await getJson(`/api/library/${workspace.selectedLibrary}`);
+  const entry = data.entry;
+  if (entry.specification) {
+    applySpecification(entry.specification);
+    await calculateAll({quiet: true});
+    $("moduleDialog").close();
+    showToast(`Applied ${entry.name}`);
+  } else if (entry.model) {
+    const module = entry.category === "cavity" ? "cavity" : "planar";
+    $("moduleDialog").close();
+    await openEngineeringModule(module);
+    const values = entry.model;
+    $("modelRecipe").value = values.recipe;
+    $("modelName").value = entry.id.replaceAll("-", "_");
+    $("modelOrder").value = values.order || 4;
+    $("modelLength").value = values.length_mm || 100;
+    $("modelWidth").value = values.width_mm || values.board_width_mm || 40;
+    $("modelHeight").value = values.height_mm || values.substrate_height_mm || 1.524;
+  }
+  return data;
+}
+
+function networkMetrics(points) {
+  const peak = points.reduce((best, point) => point.s21_db > best.s21_db ? point : best, points[0]);
+  const threshold = peak.s21_db - 3;
+  const passband = points.filter((point) => point.s21_db >= threshold);
+  return {
+    points: points.length,
+    center_hz: peak.freq_hz,
+    bandwidth_3db_hz: passband.length > 1
+      ? passband[passband.length - 1].freq_hz - passband[0].freq_hz
+      : 0,
+    minimum_s11_db: Math.min(...points.map((point) => point.s11_db)),
+    peak_s21_db: peak.s21_db
+  };
+}
+
+function setModuleOutput(data) {
+  const output = $("moduleOutput");
+  if (output) output.textContent = JSON.stringify(data, null, 2);
+  logService(`Module ${workspace.activeModule}`, data);
+}
+
+function setModuleStatus(message) {
+  $("moduleStatus").textContent = message;
+}
+
+function escapeHtml(value) {
+  const text = document.createElement("span");
+  text.textContent = String(value ?? "");
+  return text.innerHTML;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleString();
+}
+
 function saveProject() {
   const project = {
     format: "hfss-filter-studio-project",
-    version: 1,
+    version: 2,
     saved_at: new Date().toISOString(),
     specification: currentSpecification(),
-    matrix: workspace.result?.matrix || null
+    matrix: workspace.result?.matrix || null,
+    measurements: {
+      hfss: workspace.hfssMeasurement,
+      vna: workspace.measurement
+    }
   };
   downloadFile(
     `hfss-filter-${workspace.filterType.toLowerCase()}.json`,
@@ -850,6 +1629,9 @@ function loadProjectFile(file) {
         workspace.result.matrix = project.matrix;
         renderMatrix();
       }
+      workspace.hfssMeasurement = project.measurements?.hfss || [];
+      workspace.measurement = project.measurements?.vna || [];
+      drawChart();
       setDirty(false);
       setOperation(`Project loaded: ${file.name}`);
       showToast("Project loaded");
@@ -947,7 +1729,7 @@ function resetInputs() {
   calculateAll({quiet: true});
 }
 
-function editSelectedSign() {
+async function editSelectedSign() {
   if (!workspace.result || !workspace.selectedCell) {
     showToast("Select a matrix cell first", true);
     return;
@@ -958,6 +1740,7 @@ function editSelectedSign() {
   values[column][row] = values[row][column];
   setDirty();
   renderMatrix();
+  await evaluateEditedMatrix();
 }
 
 function bindEvents() {
@@ -970,16 +1753,17 @@ function bindEvents() {
   $("addZero").addEventListener("click", addTransmissionZero);
   $("applyDispersion").addEventListener("click", () => calculateAll());
   $("editTopology").addEventListener("click", () => showToast("Topology follows order, zeros and matrix couplings"));
-  $("matrixFit").addEventListener("click", renderMatrix);
+  $("matrixFit").addEventListener("click", evaluateEditedMatrix);
   $("exportMatrix").addEventListener("click", exportMatrix);
   $("loadProject").addEventListener("click", () => $("projectFile").click());
   $("projectFile").addEventListener("change", (event) => loadProjectFile(event.target.files[0]));
   $("editSign").addEventListener("click", editSelectedSign);
-  $("editMatrix").addEventListener("click", () => {
+  $("editMatrix").addEventListener("click", async () => {
     workspace.matrixEditing = !workspace.matrixEditing;
     $("editMatrix").classList.toggle("active", workspace.matrixEditing);
     $("editMatrix").textContent = workspace.matrixEditing ? "Finish Edit" : "Edit Matrix";
     renderMatrix();
+    if (!workspace.matrixEditing) await evaluateEditedMatrix();
   });
 
   document.querySelectorAll(".mode-button").forEach((button) => {
@@ -1033,9 +1817,11 @@ function bindEvents() {
   });
 
   document.querySelectorAll("[data-module]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.module === "single") return;
-      showToast(`${button.textContent.trim()} module is staged for the next implementation phase`);
+    button.addEventListener("click", async () => {
+      document.querySelectorAll("[data-module]").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      await openEngineeringModule(button.dataset.module);
     });
   });
 
@@ -1108,12 +1894,34 @@ function bindEvents() {
   $("openAedt").addEventListener("click", openAedt);
   $("loadVariables").addEventListener("click", loadVariables);
   $("setVariables").addEventListener("click", setVariables);
+  $("configureAedt").addEventListener("click", configureAedt);
+  $("validateAedt").addEventListener("click", validateAedt);
   $("evaluateAedt").addEventListener("click", evaluateAedt);
+  $("exportAedtResults").addEventListener("click", exportAedtResults);
   $("releaseAedt").addEventListener("click", releaseAedt);
+  $("discoverVna").addEventListener("click", discoverVna);
   $("connectVna").addEventListener("click", connectVna);
   $("applySweep").addEventListener("click", applySweep);
   $("singleSweep").addEventListener("click", singleSweep);
   $("saveTrace").addEventListener("click", saveTrace);
+  $("inspectVna").addEventListener("click", inspectVna);
+  $("closeVna").addEventListener("click", closeVna);
+  $("refreshJobs").addEventListener("click", refreshJobs);
+  $("cancelActiveJob").addEventListener("click", cancelActiveJob);
+
+  $("closeModule").addEventListener("click", () => $("moduleDialog").close());
+  $("moduleDialog").addEventListener("click", (event) => {
+    if (event.target === $("moduleDialog")) $("moduleDialog").close();
+  });
+  $("moduleExecute").addEventListener("click", runActiveModule);
+  $("moduleSecondary").addEventListener("click", async () => {
+    try {
+      await refreshActiveModule();
+    } catch (error) {
+      setModuleStatus(error.message);
+      showToast(error.message, true);
+    }
+  });
 
   new ResizeObserver(() => drawChart()).observe(document.querySelector(".chart-stage"));
   window.addEventListener("keydown", (event) => {

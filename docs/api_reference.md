@@ -115,7 +115,7 @@ Resposta:
 ```json
 {
   "ok": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "aedt": {"connected": false, "backend": "simulated", "resource": null, "detail": null},
   "vna": {"connected": false, "backend": "simulated", "resource": "SIM::VNA", "detail": null}
 }
@@ -409,3 +409,179 @@ Aceita `start_hz`/`stop_hz` ou `center_hz`/`span_hz`.
 ```json
 {"value": -10}
 ```
+
+## Multiplexer
+
+### `POST /api/synthesis/multiplexer`
+
+```json
+{
+  "start_ghz": 0.8,
+  "stop_ghz": 1.3,
+  "points": 801,
+  "channels": [
+    {"name": "Low", "f0_ghz": 0.95, "bandwidth_ghz": 0.05, "order": 4},
+    {"name": "High", "f0_ghz": 1.15, "bandwidth_ghz": 0.05, "order": 4}
+  ]
+}
+```
+
+Retorna resposta agregada, series por canal, matrizes e topologia de junction.
+
+## Coupling Matrix
+
+### `POST /api/synthesis/matrix-response`
+
+Avalia diretamente uma matriz de acoplamento real editada:
+
+```json
+{
+  "specification": {
+    "filter_type": "BPF",
+    "order": 4,
+    "return_loss_db": 25,
+    "f0_ghz": 1.0,
+    "bandwidth_ghz": 0.05,
+    "start_ghz": 0.875,
+    "stop_ghz": 1.125,
+    "points": 401
+  },
+  "matrix": {
+    "labels": ["S", "1", "2", "3", "4", "L"],
+    "values": [
+      [0, 1.1522, 0, 0, 0, 0],
+      [1.1522, 0, 1.0409, 0, 0, 0],
+      [0, 1.0409, 0, 0.7715, 0, 0],
+      [0, 0, 0.7715, 0, 1.0409, 0],
+      [0, 0, 0, 1.0409, 0, 1.1522],
+      [0, 0, 0, 0, 1.1522, 0]
+    ]
+  }
+}
+```
+
+Retorna as series `s11`, `s21`, `s12` e `s22`, alem das metricas no centro.
+O motor usa a formulacao de matriz carregada normalizada. A matriz deve ser
+quadrada, simetrica e compatível com `order + 2`.
+
+## Modelagem
+
+### `POST /api/modeling/plan`
+
+Gera preview sem alterar AEDT:
+
+```json
+{
+  "method": "buildcavityfull3d",
+  "recipe": "cavity",
+  "name": "FilterA",
+  "order": 4,
+  "length_mm": 120,
+  "width_mm": 50,
+  "height_mm": 25,
+  "dry_run": true,
+  "assign_ports": true,
+  "setup_name": "FilterSetup",
+  "sweep_name": "FilterSweep",
+  "f0_ghz": 1,
+  "start_ghz": 0.875,
+  "stop_ghz": 1.125
+}
+```
+
+O mesmo payload pode ser enviado para a rota HFSS correspondente com
+`dry_run=false`. Familias: cavity, combline, waveguide, planar, SIW e LPF.
+
+### AEDT operacional
+
+- `POST /api/aedt/configureanalysis`
+- `POST /api/aedt/validatedesign`
+- `POST /api/aedt/exportresults`
+- `POST /api/aedt/stopanalysis`
+
+## Jobs AEDT
+
+### `POST /api/jobs`
+
+```json
+{
+  "setup_name": "Setup1",
+  "sweep_name": "Sweep1",
+  "output_touchstone": "D:\\simulation\\hfss.s2p",
+  "cores": 8
+}
+```
+
+### Consulta e cancelamento
+
+- `GET /api/jobs`
+- `GET /api/jobs/<id>`
+- `POST /api/jobs/<id>/cancel`
+
+Estados: `queued`, `running`, `cancelling`, `completed`, `failed`, `cancelled`.
+
+## Touchstone
+
+### `POST /api/touchstone/import`
+
+```json
+{"path": "D:\\simulation\\measurement.s2p"}
+```
+
+Aceita RI, MA e DB com unidade Hz/kHz/MHz/GHz.
+
+### `POST /api/analysis/compare`
+
+```json
+{
+  "reference_path": "D:\\simulation\\hfss.s2p",
+  "candidate_path": "D:\\simulation\\vna.s2p"
+}
+```
+
+Tambem aceita objetos `reference` e `candidate` com `points`.
+
+## Engenharia
+
+### `POST /api/engineering/tuning`
+
+Recebe metricas `target`, `measured` e sensibilidades em Hz/turn ou dB/turn.
+
+### `POST /api/engineering/optimize`
+
+Recebe `specification`, `targets`, `variables`, `max_iterations`, `population`
+e `seed`.
+
+### `POST /api/engineering/monte-carlo`
+
+Recebe `specification`, `samples`, `seed`, `tolerances` e `limits`.
+
+### `POST /api/engineering/transmission-line`
+
+`kind` pode ser `microstrip`, `stripline`, `rectangular_waveguide` ou `siw`.
+
+## Projetos
+
+- `GET|POST /api/projects`
+- `GET|PUT|DELETE /api/projects/<id>`
+- `GET /api/projects/<id>/versions`
+- `POST /api/projects/<id>/restore/<revision>`
+
+O formato atual e `hfss-filter-studio-project`, versao 2.
+
+## Biblioteca
+
+- `GET /api/library`
+- `GET /api/library/<id>`
+
+O filtro opcional `category` aceita `synthesis`, `cavity` ou `planar`.
+
+## Diagnostico VNA
+
+- `GET /api/vna/resources`
+- `GET /api/vna/capabilities`
+- `GET /api/vna/errors`
+- `POST /api/vna/close`
+
+`POST /api/vna/single-sweep` retorna os quatro parametros complexos de duas
+portas.
