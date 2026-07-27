@@ -17,6 +17,10 @@ from hfss_vna_bridge.engines.engineering import (
     transmission_line,
     tuning_recommendations,
 )
+from hfss_vna_bridge.services.advanced_algorithms import (
+    run_algorithm,
+    supported_algorithms,
+)
 from hfss_vna_bridge.services.library import get_library_entry, list_library
 from hfss_vna_bridge.services.modeling import model_plan
 from hfss_vna_bridge.services.multiplexer import synthesize_multiplexer
@@ -300,6 +304,22 @@ def create_app(
         return _call_service(
             lambda: {"status": 0, "ok": True, "plan": model_plan(method, data)}
         )
+
+    @app.get("/algorithms")
+    def algorithms() -> dict[str, object]:
+        return {
+            "status": 0,
+            "ok": True,
+            "algorithms": supported_algorithms(),
+        }
+
+    @app.post("/algorithms/{method}")
+    def algorithm(method: str, payload: dict[str, object]) -> dict[str, object]:
+        return _call_service(run_algorithm, method, payload)
+
+    @app.post("/api/v1/algorithm/general/{method}")
+    def algorithm_compat(method: str, payload: dict[str, object]) -> dict[str, object]:
+        return _call_service(run_algorithm, method, payload)
 
     @app.get("/library")
     def library(category: str | None = None) -> dict[str, object]:

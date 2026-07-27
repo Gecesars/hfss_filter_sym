@@ -17,6 +17,11 @@ from hfss_vna_bridge.engines.engineering import (
     transmission_line,
     tuning_recommendations,
 )
+from hfss_vna_bridge.services.advanced_algorithms import (
+    algorithm_exists,
+    run_algorithm,
+    supported_algorithms,
+)
 from hfss_vna_bridge.services.library import get_library_entry, list_library
 from hfss_vna_bridge.services.modeling import model_plan
 from hfss_vna_bridge.services.multiplexer import synthesize_multiplexer
@@ -123,6 +128,24 @@ def create_app(
         return _service_call(
             lambda: {"status": 0, "ok": True, "plan": model_plan(method, payload)}
         )
+
+    @app.get("/api/algorithms")
+    def api_algorithms():
+        return _json(
+            {
+                "status": 0,
+                "ok": True,
+                "algorithms": supported_algorithms(),
+            }
+        )
+
+    @app.post("/api/algorithms/<method>")
+    def api_algorithm(method: str):
+        return _service_call(run_algorithm, method, _payload())
+
+    @app.post("/api/v1/algorithm/general/<method>")
+    def api_v1_algorithm(method: str):
+        return _service_call(run_algorithm, method, _payload())
 
     @app.route("/api/projects", methods=["GET", "POST"])
     def api_projects():
@@ -269,6 +292,8 @@ def create_app(
     def compat_vna(method: str):
         if method == "shutdown":
             return _json({"status": 0, "ok": True, "shutdown": "not-enabled"})
+        if algorithm_exists(method):
+            return _service_call(run_algorithm, method, _payload())
         return _dispatch_vna(app, method)
 
     @socketio.on("deepOptimization")

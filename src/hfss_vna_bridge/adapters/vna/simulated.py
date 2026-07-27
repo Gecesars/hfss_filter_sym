@@ -19,6 +19,12 @@ class SimulatedVnaAdapter:
         self._sweep_type = "LIN"
         self._continuous = False
         self._markers: dict[int, float] = {}
+        self._traces: dict[int, dict[str, Any]] = {}
+        self._averaging = {"enabled": False, "count": 1}
+        self._correction = False
+        self._trigger_source = "IMM"
+        self._rf_output = False
+        self._calibration: dict[str, Any] | None = None
 
     @property
     def state(self) -> AdapterState:
@@ -38,6 +44,12 @@ class SimulatedVnaAdapter:
         self._sweep_type = "LIN"
         self._continuous = False
         self._markers.clear()
+        self._traces.clear()
+        self._averaging = {"enabled": False, "count": 1}
+        self._correction = False
+        self._trigger_source = "IMM"
+        self._rf_output = False
+        self._calibration = None
         self._state = AdapterState(True, "simulated", self._resource, "reset")
         return self._state
 
@@ -135,6 +147,113 @@ class SimulatedVnaAdapter:
         del trace
         self._require_connected()
         return True
+
+    def define_trace(
+        self,
+        parameter: str,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> dict[str, Any]:
+        self._require_connected()
+        value = parameter.strip().upper()
+        if value not in {"S11", "S21", "S12", "S22"}:
+            raise ValueError("parameter must be S11, S21, S12, or S22")
+        self._traces[int(trace)] = {
+            "parameter": value,
+            "trace": int(trace),
+            "window": int(window),
+            "visible": True,
+        }
+        return dict(self._traces[int(trace)])
+
+    def set_trace_visible(
+        self,
+        enabled: bool,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> bool:
+        self._require_connected()
+        item = self._traces.setdefault(
+            int(trace),
+            {"parameter": "S11", "trace": int(trace), "window": int(window)},
+        )
+        item["visible"] = bool(enabled)
+        return bool(enabled)
+
+    def set_averaging(self, enabled: bool, count: int = 1) -> dict[str, Any]:
+        self._require_connected()
+        if not 1 <= int(count) <= 65_536:
+            raise ValueError("averaging count must be between 1 and 65536")
+        self._averaging = {"enabled": bool(enabled), "count": int(count)}
+        return dict(self._averaging)
+
+    def set_correction(self, enabled: bool) -> bool:
+        self._require_connected()
+        self._correction = bool(enabled)
+        return self._correction
+
+    def set_trigger_source(self, source: str) -> str:
+        self._require_connected()
+        value = source.strip().upper()
+        if value not in {"IMM", "INT", "EXT", "BUS", "MAN"}:
+            raise ValueError("Unsupported trigger source")
+        self._trigger_source = value
+        return value
+
+    def set_rf_output(self, enabled: bool) -> bool:
+        self._require_connected()
+        self._rf_output = bool(enabled)
+        return self._rf_output
+
+    def calibration_begin(
+        self,
+        calibration_type: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        self._require_connected()
+        value = calibration_type.strip().upper()
+        if value not in {"SOLT1", "SOLT2", "THRU", "OPEN", "SHORT"}:
+            raise ValueError("Unsupported calibration type")
+        self._calibration = {
+            "type": value,
+            "ports": [int(port) for port in ports],
+            "standards": [],
+            "state": "collecting",
+        }
+        return dict(self._calibration)
+
+    def calibration_acquire(
+        self,
+        standard: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        self._require_connected()
+        if not self._calibration or self._calibration["state"] != "collecting":
+            raise RuntimeError("No calibration collection is active")
+        item = {"standard": standard.strip().upper(), "ports": [int(port) for port in ports]}
+        self._calibration["standards"].append(item)
+        return {**self._calibration, "last_acquisition": item}
+
+    def calibration_save(self) -> dict[str, Any]:
+        self._require_connected()
+        if not self._calibration:
+            raise RuntimeError("No calibration collection is active")
+        self._calibration["state"] = "saved"
+        self._correction = True
+        return dict(self._calibration)
+
+    def calibration_abort(self) -> dict[str, Any]:
+        self._require_connected()
+        result = dict(self._calibration or {"state": "idle"})
+        result["state"] = "aborted"
+        self._calibration = None
+        return result
+
+    def save_state(self, path: str) -> bool:
+        self._require_connected()
+        return bool(path.strip())
 
     def _require_connected(self) -> None:
         if not self._state.connected:

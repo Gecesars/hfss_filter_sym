@@ -34,6 +34,10 @@ VNA_METHODS = [
     "setcontinoussweep",
     "settrace",
     "settracestatus",
+    "setaveraging",
+    "setcorrection",
+    "triggersource",
+    "setrfoutput",
     "setmarkers",
     "setautoscaletrace",
     "getsweeptime",
@@ -45,6 +49,11 @@ VNA_METHODS = [
     "beginbackgroundsweep",
     "endbackgroundsweep",
     "exports2p",
+    "savestate",
+    "calibrationbegin",
+    "calibrationacquire",
+    "calibrationsave",
+    "calibrationabort",
 ]
 
 AEDT_METHODS = [
@@ -120,6 +129,13 @@ class VnaSessionState:
     background_sweep: bool = False
     markers: dict[str, dict[str, Any]] = field(default_factory=dict)
     traces: dict[str, dict[str, Any]] = field(default_factory=dict)
+    averaging: dict[str, Any] = field(
+        default_factory=lambda: {"enabled": False, "count": 1}
+    )
+    correction_enabled: bool = False
+    trigger_source: str = "IMM"
+    rf_output_enabled: bool = False
+    calibration: dict[str, Any] | None = None
     last_sweep: list[dict[str, float]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -177,6 +193,11 @@ class SymMatrixDispatcher:
                     "background_sweep": self.vna_state.background_sweep,
                     "markers": self.vna_state.markers,
                     "traces": self.vna_state.traces,
+                    "averaging": self.vna_state.averaging,
+                    "correction_enabled": self.vna_state.correction_enabled,
+                    "trigger_source": self.vna_state.trigger_source,
+                    "rf_output_enabled": self.vna_state.rf_output_enabled,
+                    "calibration": self.vna_state.calibration,
                     "last_sweep_points": len(self.vna_state.last_sweep),
                 },
             },
@@ -273,7 +294,7 @@ class SymMatrixDispatcher:
         resource = self.registry.vna.state.resource or "SIM::VNA"
         self.registry.vna.close()
         self.registry.vna = SimulatedVnaAdapter(resource)
-        self.vna_state.last_sweep = []
+        self.vna_state = VnaSessionState()
         return self._ok(state=self._adapter_state(self.registry.vna.state))
 
     def _vna_reset(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -282,6 +303,11 @@ class SymMatrixDispatcher:
         self.vna_state.last_sweep = []
         self.vna_state.markers.clear()
         self.vna_state.traces.clear()
+        self.vna_state.averaging = {"enabled": False, "count": 1}
+        self.vna_state.correction_enabled = False
+        self.vna_state.trigger_source = "IMM"
+        self.vna_state.rf_output_enabled = False
+        self.vna_state.calibration = None
         return self._ok(state=self._adapter_state(state), config=self._sweep_config(self.registry.vna.sweep_config))
 
     def _vna_clearerrmsg(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -405,15 +431,73 @@ class SymMatrixDispatcher:
         return self._ok(continuous_sweep=enabled)
 
     def _vna_settrace(self, payload: dict[str, Any]) -> dict[str, Any]:
-        trace_id = str(_first(payload, "trace", "traceNum", "index", "sensorNum") or len(self.vna_state.traces) + 1)
-        self.vna_state.traces[trace_id] = dict(payload)
-        return self._ok(trace=trace_id, traces=self.vna_state.traces)
+        trace = int(
+            _first(payload, "trace", "traceNum", "index", "sensorNum")
+            or len(self.vna_state.traces) + 1
+        )
+        window = int(_first(payload, "window", "windowNum", "display") or 1)
+        parameter = str(
+            _first(payload, "parameter", "s_parameter", "measurement", "value")
+            or "S11"
+        ).upper()
+        hardware = self.registry.vna.define_trace(
+            parameter,
+            trace=trace,
+            window=window,
+        )
+        trace_id = str(trace)
+        self.vna_state.traces[trace_id] = {**dict(payload), **hardware}
+        return self._ok(
+            trace=trace_id,
+            hardware=hardware,
+            traces=self.vna_state.traces,
+        )
 
     def _vna_settracestatus(self, payload: dict[str, Any]) -> dict[str, Any]:
         trace_id = str(_first(payload, "trace", "traceNum", "index", "sensorNum") or "1")
+        window = int(_first(payload, "window", "windowNum", "display") or 1)
+        enabled = _coerce_bool(
+            _first(payload, "visible", "enabled", "on", "value")
+        )
+        hardware = self.registry.vna.set_trace_visible(
+            enabled,
+            trace=int(trace_id),
+            window=window,
+        )
         trace = self.vna_state.traces.setdefault(trace_id, {})
-        trace["visible"] = bool(_first(payload, "visible", "enabled", "on", "value"))
-        return self._ok(trace=trace_id, traces=self.vna_state.traces)
+        trace.update({"visible": hardware, "window": window})
+        return self._ok(
+            trace=trace_id,
+            visible=hardware,
+            traces=self.vna_state.traces,
+        )
+
+    def _vna_setaveraging(self, payload: dict[str, Any]) -> dict[str, Any]:
+        enabled = _coerce_bool(
+            _first(payload, "enabled", "on", "average", "value")
+        )
+        count = int(_first(payload, "count", "averages", "factor") or 1)
+        self.vna_state.averaging = self.registry.vna.set_averaging(enabled, count)
+        return self._ok(averaging=self.vna_state.averaging)
+
+    def _vna_setcorrection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        enabled = _coerce_bool(
+            _first(payload, "enabled", "on", "correction", "value")
+        )
+        self.vna_state.correction_enabled = self.registry.vna.set_correction(
+            enabled
+        )
+        return self._ok(correction_enabled=self.vna_state.correction_enabled)
+
+    def _vna_triggersource(self, payload: dict[str, Any]) -> dict[str, Any]:
+        source = str(_first(payload, "source", "trigger", "value") or "IMM")
+        self.vna_state.trigger_source = self.registry.vna.set_trigger_source(source)
+        return self._ok(trigger_source=self.vna_state.trigger_source)
+
+    def _vna_setrfoutput(self, payload: dict[str, Any]) -> dict[str, Any]:
+        enabled = _coerce_bool(_first(payload, "enabled", "on", "value"))
+        self.vna_state.rf_output_enabled = self.registry.vna.set_rf_output(enabled)
+        return self._ok(rf_output_enabled=self.vna_state.rf_output_enabled)
 
     def _vna_setmarkers(self, payload: dict[str, Any]) -> dict[str, Any]:
         marker_id = str(_first(payload, "marker", "markerNum", "index") or len(self.vna_state.markers) + 1)
@@ -494,6 +578,50 @@ class SymMatrixDispatcher:
         self.registry.vna.set_continuous(False)
         self.vna_state.background_sweep = False
         return self._ok(background_sweep=False)
+
+    def _vna_savestate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = _first_text(payload, "path", "filePath", "filename")
+        if not path:
+            raise ValueError("path is required")
+        saved = self.registry.vna.save_state(path)
+        return self._ok(saved=saved, path=path)
+
+    def _vna_calibrationbegin(self, payload: dict[str, Any]) -> dict[str, Any]:
+        calibration_type = str(
+            _first(payload, "calibration_type", "type", "method") or "SOLT2"
+        )
+        ports = _ports_from_payload(payload)
+        self.vna_state.calibration = self.registry.vna.calibration_begin(
+            calibration_type,
+            ports,
+        )
+        return self._ok(calibration=self.vna_state.calibration)
+
+    def _vna_calibrationacquire(self, payload: dict[str, Any]) -> dict[str, Any]:
+        standard = str(_first(payload, "standard", "type", "value") or "")
+        if not standard:
+            raise ValueError("standard is required")
+        ports = _ports_from_payload(payload)
+        self.vna_state.calibration = self.registry.vna.calibration_acquire(
+            standard,
+            ports,
+        )
+        return self._ok(calibration=self.vna_state.calibration)
+
+    def _vna_calibrationsave(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        self.vna_state.calibration = self.registry.vna.calibration_save()
+        self.vna_state.correction_enabled = True
+        return self._ok(
+            calibration=self.vna_state.calibration,
+            correction_enabled=True,
+        )
+
+    def _vna_calibrationabort(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        result = self.registry.vna.calibration_abort()
+        self.vna_state.calibration = result
+        return self._ok(calibration=result)
 
     def _aedt_openproject(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = _first_text(payload, "project_path", "project", "file", "filename")
@@ -846,6 +974,7 @@ class SymMatrixDispatcher:
             "message": "Method is not part of the current compatibility surface.",
         }
 
+
 def _normalize_method(method: str) -> str:
     return method.replace("-", "").replace("_", "").lower()
 
@@ -907,6 +1036,24 @@ def _frequency_to_hz(value: Any, unit: str | None = None) -> float:
     if abs(numeric) < 100_000:
         return numeric * 1_000_000
     return numeric
+
+
+def _ports_from_payload(payload: dict[str, Any]) -> list[int]:
+    raw = _first(payload, "ports", "port_numbers", "port")
+    if raw is None:
+        return [1, 2]
+    if isinstance(raw, str):
+        values = [part.strip() for part in raw.replace(";", ",").split(",")]
+        ports = [int(part) for part in values if part]
+    elif isinstance(raw, (list, tuple)):
+        ports = [int(port) for port in raw]
+    else:
+        ports = [int(raw)]
+    if not ports or any(port < 1 for port in ports):
+        raise ValueError("ports must contain positive integers")
+    if len(set(ports)) != len(ports):
+        raise ValueError("ports must not contain duplicates")
+    return ports
 
 
 def _variables_from_payload(

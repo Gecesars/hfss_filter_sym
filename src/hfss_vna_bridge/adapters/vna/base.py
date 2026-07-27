@@ -59,3 +59,56 @@ class VnaAdapter(Protocol):
 
     def autoscale(self, trace: int = 1) -> bool:
         raise NotImplementedError
+
+    def define_trace(
+        self,
+        parameter: str,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def set_trace_visible(
+        self,
+        enabled: bool,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> bool:
+        raise NotImplementedError
+
+    def set_averaging(self, enabled: bool, count: int = 1) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def set_correction(self, enabled: bool) -> bool:
+        raise NotImplementedError
+
+    def set_trigger_source(self, source: str) -> str:
+        raise NotImplementedError
+
+    def set_rf_output(self, enabled: bool) -> bool:
+        raise NotImplementedError
+
+    def calibration_begin(
+        self,
+        calibration_type: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def calibration_acquire(
+        self,
+        standard: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def calibration_save(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def calibration_abort(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def save_state(self, path: str) -> bool:
+        raise NotImplementedError

@@ -38,6 +38,7 @@ class PyVisaVnaAdapter:
         self._sweep_type = "LIN"
         self._continuous = False
         self._measurement_names: dict[str, str] = {}
+        self._calibration: dict[str, Any] | None = None
 
     @property
     def state(self) -> AdapterState:
@@ -126,6 +127,11 @@ class PyVisaVnaAdapter:
             "sweep_types": ["LIN", "LOG", "SEGM", "POW"],
             "markers": True,
             "continuous": True,
+            "averaging": True,
+            "error_correction": True,
+            "calibration": ["SOLT1", "SOLT2", "THRU", "OPEN", "SHORT"],
+            "trigger_sources": ["IMM", "INT", "EXT", "BUS", "MAN"],
+            "rf_output_control": True,
             "binary_transfer": False,
             "corrected_complex_data": True,
         }
@@ -267,9 +273,133 @@ class PyVisaVnaAdapter:
         self._write(f"DISP:WIND1:TRAC{int(trace)}:Y:AUTO")
         return True
 
+    def define_trace(
+        self,
+        parameter: str,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> dict[str, Any]:
+        value = parameter.strip().upper()
+        if value not in self.PARAMETERS:
+            raise ValueError("parameter must be S11, S21, S12, or S22")
+        name = f"HFSSFS_T{int(trace)}_{value}"
+        try:
+            self._write(self._profile.delete(name, self._channel))
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        self._write(self._profile.define(name, value, self._channel))
+        self._write(f"DISP:WIND{int(window)}:STAT ON")
+        self._write(f"DISP:WIND{int(window)}:TRAC{int(trace)}:FEED '{name}'")
+        self._measurement_names[value] = name
+        return {
+            "name": name,
+            "parameter": value,
+            "trace": int(trace),
+            "window": int(window),
+        }
+
+    def set_trace_visible(
+        self,
+        enabled: bool,
+        *,
+        trace: int = 1,
+        window: int = 1,
+    ) -> bool:
+        self._write(
+            f"DISP:WIND{int(window)}:TRAC{int(trace)}:STAT "
+            f"{'ON' if enabled else 'OFF'}"
+        )
+        return bool(enabled)
+
+    def set_averaging(self, enabled: bool, count: int = 1) -> dict[str, Any]:
+        value = int(count)
+        if not 1 <= value <= 65_536:
+            raise ValueError("averaging count must be between 1 and 65536")
+        self._write(f"SENS{self._channel}:AVER:COUN {value}")
+        self._write(f"SENS{self._channel}:AVER:STAT {'ON' if enabled else 'OFF'}")
+        if enabled:
+            self._write(f"SENS{self._channel}:AVER:CLE")
+        return {"enabled": bool(enabled), "count": value}
+
+    def set_correction(self, enabled: bool) -> bool:
+        self._write(f"SENS{self._channel}:CORR:STAT {'ON' if enabled else 'OFF'}")
+        return bool(enabled)
+
+    def set_trigger_source(self, source: str) -> str:
+        value = source.strip().upper()
+        if value not in {"IMM", "INT", "EXT", "BUS", "MAN"}:
+            raise ValueError("source must be IMM, INT, EXT, BUS, or MAN")
+        self._write(f"TRIG:SOUR {value}")
+        return value
+
+    def set_rf_output(self, enabled: bool) -> bool:
+        self._write(f"OUTP {'ON' if enabled else 'OFF'}")
+        return bool(enabled)
+
+    def calibration_begin(
+        self,
+        calibration_type: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        value = calibration_type.strip().upper()
+        valid = {"SOLT1", "SOLT2", "THRU", "OPEN", "SHORT"}
+        if value not in valid:
+            raise ValueError(f"calibration_type must be one of {sorted(valid)}")
+        port_values = _calibration_ports(ports)
+        suffix = ",".join(str(port) for port in port_values)
+        self._write(f"SENS{self._channel}:CORR:COLL:CLE")
+        self._write(f"SENS{self._channel}:CORR:COLL:METH:{value} {suffix}")
+        self._calibration = {
+            "type": value,
+            "ports": port_values,
+            "standards": [],
+            "state": "collecting",
+        }
+        return dict(self._calibration)
+
+    def calibration_acquire(
+        self,
+        standard: str,
+        ports: list[int],
+    ) -> dict[str, Any]:
+        if not self._calibration or self._calibration["state"] != "collecting":
+            raise RuntimeError("No calibration collection is active")
+        value = standard.strip().upper()
+        if value not in {"OPEN", "SHORT", "LOAD", "THRU", "ISOL"}:
+            raise ValueError("standard must be OPEN, SHORT, LOAD, THRU, or ISOL")
+        port_values = _calibration_ports(ports)
+        suffix = ",".join(str(port) for port in port_values)
+        self._write(f"SENS{self._channel}:CORR:COLL:{value} {suffix}")
+        self._query("*OPC?")
+        acquisition = {"standard": value, "ports": port_values}
+        self._calibration["standards"].append(acquisition)
+        return {**self._calibration, "last_acquisition": acquisition}
+
+    def calibration_save(self) -> dict[str, Any]:
+        if not self._calibration:
+            raise RuntimeError("No calibration collection is active")
+        self._write(f"SENS{self._channel}:CORR:COLL:SAVE")
+        self._query("*OPC?")
+        self._calibration["state"] = "saved"
+        return dict(self._calibration)
+
+    def calibration_abort(self) -> dict[str, Any]:
+        self._write(f"SENS{self._channel}:CORR:COLL:CLE")
+        result = dict(self._calibration or {"state": "idle"})
+        result["state"] = "aborted"
+        self._calibration = None
+        return result
+
     def load_state(self, path: str) -> bool:
         escaped = path.replace("'", "''")
         self._write(f"MMEM:LOAD:STAT 1,'{escaped}'")
+        self._query("*OPC?")
+        return True
+
+    def save_state(self, path: str) -> bool:
+        escaped = path.replace("'", "''")
+        self._write(f"MMEM:STOR:STAT 1,'{escaped}'")
         self._query("*OPC?")
         return True
 
@@ -360,3 +490,12 @@ def _load_pyvisa() -> Any:
             "PyVISA is not available. Install with: uv sync --extra vna"
         ) from exc
     return pyvisa
+
+
+def _calibration_ports(ports: list[int]) -> list[int]:
+    values = [int(port) for port in ports]
+    if not values or len(values) > 2 or any(port < 1 for port in values):
+        raise ValueError("ports must contain one or two positive port numbers")
+    if len(set(values)) != len(values):
+        raise ValueError("calibration ports must be unique")
+    return values
