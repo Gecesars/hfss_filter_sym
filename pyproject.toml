@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hfss-vna-bridge"
+version = "0.1.0"
+description = "Original Python bridge for AEDT/HFSS automation and VNA acquisition"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "HFSS Auto" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+  "pydantic>=2.10",
+]
+
+[project.optional-dependencies]
+aedt = [
+  "pyaedt>=1.3",
+  "pywin32>=306; platform_system == 'Windows'",
+]
+vna = [
+  "pyvisa>=1.14",
+]
+dev = [
+  "pytest>=8.3",
+  "httpx>=0.28",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+hfss-vna-bridge = "hfss_vna_bridge.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hfss_vna_bridge"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
