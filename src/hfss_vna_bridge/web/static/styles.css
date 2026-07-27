@@ -1261,6 +1261,24 @@ textarea:focus-visible {
   grid-column: 1 / -1;
 }
 
+.integration-form .check-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  min-height: 31px;
+  padding: 0 8px;
+  color: #3f4a54;
+  background: #e8eaec;
+  border: 1px solid #ccd1d5;
+}
+
+.integration-form .check-field input {
+  width: 14px;
+  min-height: 14px;
+  margin: 0 7px 0 0;
+}
+
 .vna-form {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

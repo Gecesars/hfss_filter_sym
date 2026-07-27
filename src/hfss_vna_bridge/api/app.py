@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 
 from hfss_vna_bridge import __version__
+from hfss_vna_bridge.adapters.aedt.installations import aedt_environment_diagnostics
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.adapters.aedt.simulated import SimulatedAedtAdapter
 from hfss_vna_bridge.adapters.vna.pyvisa_adapter import PyVisaVnaAdapter
@@ -58,13 +59,24 @@ def create_app(
             state = adapter.connect(
                 project_path=request.project_path,
                 design_name=request.design_name,
+                version=request.version,
                 new_desktop=request.new_desktop,
                 non_graphical=request.non_graphical,
+                close_on_exit=request.close_on_exit,
+                student_version=request.student_version,
+                machine=request.machine,
+                port=request.port,
+                aedt_process_id=request.aedt_process_id,
+                remove_lock=request.remove_lock,
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         runtime.aedt = adapter
         return _state_response(state)
+
+    @app.get("/aedt/installations")
+    def aedt_installations() -> dict[str, object]:
+        return aedt_environment_diagnostics()
 
     @app.get("/aedt/designs", response_model=list[str])
     def list_designs() -> list[str]:
@@ -94,6 +106,11 @@ def create_app(
                 setup_name=request.setup_name,
                 sweep_name=request.sweep_name,
                 output_touchstone=request.output_touchstone,
+                cores=request.cores,
+                tasks=request.tasks,
+                gpus=request.gpus,
+                blocking=request.blocking,
+                revert_to_initial_mesh=request.revert_to_initial_mesh,
             )
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -243,4 +260,3 @@ def _replace_sweep_value(app: FastAPI, **changes: float) -> SweepConfigResponse:
         return _config_response(runtime.vna.configure_sweep(SweepConfig(**data)))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-

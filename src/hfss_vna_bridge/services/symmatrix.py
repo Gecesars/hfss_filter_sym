@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from hfss_vna_bridge import __version__
+from hfss_vna_bridge.adapters.aedt.installations import aedt_environment_diagnostics
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.adapters.aedt.simulated import SimulatedAedtAdapter
 from hfss_vna_bridge.adapters.vna.pyvisa_adapter import PyVisaVnaAdapter
@@ -55,6 +56,9 @@ AEDT_METHODS = [
     "evaluatedimensionnos2p",
     "callconvergence",
     "callkillmesh",
+    "diagnostics",
+    "sessioninfo",
+    "release",
     "stop",
 ]
 
@@ -147,6 +151,7 @@ class SymMatrixDispatcher:
                     "active_design": self.aedt_state.active_design,
                     "settings": self.aedt_state.settings,
                     "last_analysis": self.aedt_state.last_analysis,
+                    "runtime": self._safe_session_info(),
                 },
             },
             vna={
@@ -437,12 +442,26 @@ class SymMatrixDispatcher:
         state = adapter.connect(
             project_path=project,
             design_name=design,
-            new_desktop=bool(payload.get("new_desktop", False)),
-            non_graphical=bool(payload.get("non_graphical", False)),
+            version=_first_text(payload, "version", "aedt_version")
+            or self.registry.settings.default_aedt_version,
+            new_desktop=_coerce_bool(payload.get("new_desktop", False)),
+            non_graphical=_coerce_bool(payload.get("non_graphical", False)),
+            close_on_exit=_coerce_bool(payload.get("close_on_exit", False)),
+            student_version=_coerce_bool(payload.get("student_version", False)),
+            machine=_first_text(payload, "machine"),
+            port=_optional_int(_first(payload, "port", "grpc_port")),
+            aedt_process_id=_optional_int(
+                _first(payload, "aedt_process_id", "process_id", "pid")
+            ),
+            remove_lock=_coerce_bool(payload.get("remove_lock", False)),
         )
         self.registry.aedt = adapter
         self.aedt_state.active_design = design or state.detail
-        return self._ok(state=self._adapter_state(state), designs=self._safe_designs())
+        return self._ok(
+            state=self._adapter_state(state),
+            designs=self._safe_designs(),
+            session=self._safe_session_info(),
+        )
 
     def _aedt_getdesigns(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
@@ -453,14 +472,13 @@ class SymMatrixDispatcher:
         design = _first_text(payload, "design_name", "design", "designName", "name")
         if not design:
             raise ValueError("design name is required")
-        state = self.registry.aedt.connect(
-            project_path=None if self.registry.aedt.state.resource == "SIM::AEDT" else self.registry.aedt.state.resource,
-            design_name=design,
-            new_desktop=False,
-            non_graphical=False,
-        )
+        state = self.registry.aedt.set_active_design(design)
         self.aedt_state.active_design = design
-        return self._ok(state=self._adapter_state(state), active_design=design)
+        return self._ok(
+            state=self._adapter_state(state),
+            active_design=design,
+            session=self._safe_session_info(),
+        )
 
     def _aedt_getvariables(self, payload: dict[str, Any]) -> dict[str, Any]:
         del payload
@@ -484,7 +502,16 @@ class SymMatrixDispatcher:
         return self._ok(settings=self.aedt_state.settings)
 
     def _aedt_createreport(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._planned("aedt", "createreport", payload=payload)
+        expressions = payload.get("expressions")
+        if expressions is not None and not isinstance(expressions, list):
+            expressions = [str(expressions)]
+        report = self.registry.aedt.create_sparameter_report(
+            expressions=expressions,
+            setup_name=_first_text(payload, "setup_name", "setup"),
+            sweep_name=_first_text(payload, "sweep_name", "sweep"),
+            plot_name=_first_text(payload, "plot_name", "name"),
+        )
+        return self._ok(report=report)
 
     def _aedt_makelpfmodel(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._planned("aedt", "makelpfmodel", payload=payload)
@@ -495,9 +522,16 @@ class SymMatrixDispatcher:
             self.registry.aedt.set_variables(variables)
         output = _touchstone_output_from_payload(payload)
         result = self.registry.aedt.analyze(
-            setup_name=str(payload.get("setup_name") or payload.get("setup") or "SynMatrix"),
-            sweep_name=str(payload.get("sweep_name") or payload.get("sweep") or "FreqSweep"),
+            setup_name=_first_text(payload, "setup_name", "setup"),
+            sweep_name=_first_text(payload, "sweep_name", "sweep"),
             output_touchstone=output,
+            cores=_optional_int(payload.get("cores")),
+            tasks=_optional_int(payload.get("tasks")),
+            gpus=_optional_int(payload.get("gpus")),
+            blocking=_coerce_bool(payload.get("blocking", True)),
+            revert_to_initial_mesh=_coerce_bool(
+                payload.get("revert_to_initial_mesh", False)
+            ),
         )
         self.aedt_state.last_analysis = result
         return self._ok(result=result, variables=variables)
@@ -512,26 +546,75 @@ class SymMatrixDispatcher:
         return result
 
     def _aedt_callconvergence(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._planned("aedt", "callconvergence", payload=payload)
+        output = _first_text(payload, "output_file", "output", "filePath")
+        exported = self.registry.aedt.export_convergence(
+            setup_name=_first_text(payload, "setup_name", "setup"),
+            output_file=output,
+        )
+        return self._ok(output_file=exported)
 
     def _aedt_callkillmesh(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._planned("aedt", "callkillmesh", payload=payload)
+        removed = self.registry.aedt.remove_solution_data(
+            entire_solution=_coerce_bool(payload.get("entire_solution", False)),
+            field=_coerce_bool(payload.get("field", False)),
+            mesh=_coerce_bool(payload.get("mesh", True)),
+            linked_data=_coerce_bool(payload.get("linked_data", False)),
+        )
+        return self._ok(removed=removed)
+
+    def _aedt_diagnostics(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        return self._ok(**aedt_environment_diagnostics())
+
+    def _aedt_sessioninfo(self, payload: dict[str, Any]) -> dict[str, Any]:
+        del payload
+        return self._ok(session=self.registry.aedt.session_info())
+
+    def _aedt_release(self, payload: dict[str, Any]) -> dict[str, Any]:
+        released = self.registry.aedt.release(
+            close_projects=_coerce_bool(payload.get("close_projects", False)),
+            close_desktop=_coerce_bool(payload.get("close_desktop", False)),
+        )
+        self.aedt_state = AedtSessionState()
+        return self._ok(
+            released=released,
+            state=self._adapter_state(self.registry.aedt.state),
+        )
 
     def _aedt_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
-        del payload
-        return self._ok(stopped=True)
+        result = self._aedt_release(payload)
+        result["stopped"] = True
+        return result
 
     def _hfss_openproject(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._aedt_openproject(payload)
 
     def _hfss_closeproject(self, payload: dict[str, Any]) -> dict[str, Any]:
-        del payload
+        close_desktop = _coerce_bool(payload.get("close_desktop", False))
+        try:
+            self.registry.aedt.release(
+                close_projects=True,
+                close_desktop=close_desktop,
+            )
+        except RuntimeError:
+            pass
         self.registry.aedt = SimulatedAedtAdapter()
         self.aedt_state = AedtSessionState()
         return self._ok(state=self._adapter_state(self.registry.aedt.state))
 
+    def _hfss_saveproject(self, payload: dict[str, Any]) -> dict[str, Any]:
+        file_name = _first_text(payload, "file_name", "project_path", "filePath")
+        path = self.registry.aedt.save_project(
+            file_name=file_name,
+            overwrite=_coerce_bool(payload.get("overwrite", True)),
+        )
+        return self._ok(project_path=path)
+
     def _hfss_updatevalues(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._aedt_setvariablesvalue(payload)
+
+    def _hfss_removemesh(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._aedt_callkillmesh(payload)
 
     def _hfss_analyzeall(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._aedt_evaluatedimensionnos2p(payload)
@@ -553,6 +636,14 @@ class SymMatrixDispatcher:
             return self.registry.aedt.list_designs()
         except RuntimeError:
             return []
+
+    def _safe_session_info(self) -> dict[str, Any] | None:
+        if not self.registry.aedt.state.connected:
+            return None
+        try:
+            return self.registry.aedt.session_info()
+        except (AttributeError, RuntimeError):
+            return None
 
     def _sweep_config(self, config: SweepConfig) -> dict[str, float | int]:
         return {
@@ -610,6 +701,27 @@ def _coerce_float(value: Any) -> float:
     if value is None:
         raise ValueError("numeric value is required")
     return float(str(value).strip())
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(value)
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off", ""}:
+        return False
+    raise ValueError(f"invalid boolean value: {value!r}")
 
 
 def _frequency_to_hz(value: Any, unit: str | None = None) -> float:

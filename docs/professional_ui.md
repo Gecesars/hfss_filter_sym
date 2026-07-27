@@ -1,6 +1,6 @@
 # Professional UI Contract
 
-Este documento descreve a interface web do HFSS Filter Studio 0.2.0 como um
+Este documento descreve a interface web do HFSS Filter Studio 0.3.0 como um
 contrato de produto. Mudancas futuras devem preservar a densidade operacional,
 a hierarquia e os fluxos descritos aqui.
 

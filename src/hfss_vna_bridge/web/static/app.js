@@ -268,16 +268,21 @@ function renderSpecification() {
   const target = $("specificationList");
   const spec = workspace.result.specification;
   const summary = workspace.result.summary;
+  const prototype = workspace.result.prototype || {};
   const rows = [
     ["Filter type", spec.filter_type],
+    ["Prototype", `${prototype.family || spec.response_family} / order ${spec.order}`],
     ["Order", String(spec.order)],
     ["Center frequency", `${spec.effective_f0_ghz.toFixed(6)} GHz`],
     ["Bandwidth", `${spec.effective_bandwidth_ghz.toFixed(6)} GHz`],
     ["Return loss", `${spec.return_loss_db.toFixed(2)} dB`],
+    ["Achieved return loss", `${summary.achieved_return_loss_db.toFixed(3)} dB`],
+    ["Prototype ripple", `${prototype.passband_ripple_db.toFixed(6)} dB`],
     ["Frequency span", `${spec.start_ghz.toFixed(6)} - ${spec.stop_ghz.toFixed(6)} GHz`],
     ["Transmission zeros", String(workspace.zeros.length)],
     ["Center insertion loss", `${summary.center_insertion_loss_db.toFixed(4)} dB`],
-    ["Minimum S11", `${summary.minimum_s11_db.toFixed(3)} dB`],
+    ["External Q", `${summary.input_external_q.toFixed(4)} / ${summary.output_external_q.toFixed(4)}`],
+    ["Lumped elements", String((workspace.result.elements || []).length)],
     ["Dispersion", workspace.dispersion]
   ];
   target.textContent = "";
@@ -615,17 +620,37 @@ function activateIntegrationView(view) {
 
 async function openAedt() {
   const backend = $("aedtBackend").value;
+  const processId = numericValue("aedtProcessId", 0);
+  const grpcPort = numericValue("aedtGrpcPort", 0);
   const payload = {
     backend,
     design_name: $("aedtDesign").value,
-    project_path: backend === "simulated" ? null : $("aedtProject").value
+    project_path: backend === "simulated" ? null : $("aedtProject").value,
+    version: $("aedtVersion").value || "2026.1",
+    new_desktop: $("aedtSessionMode").value === "new",
+    non_graphical: $("aedtDisplayMode").value === "non_graphical",
+    remove_lock: $("aedtRemoveLock").checked,
+    machine: grpcPort ? ($("aedtMachine").value.trim() || "localhost") : null,
+    port: grpcPort || null,
+    aedt_process_id: grpcPort ? null : (processId || null)
   };
   try {
     setOperation("Opening AEDT project...");
-    await postJson("/aedt/openproject", payload);
+    const data = await postJson("/aedt/openproject", payload);
+    const session = data.session || {};
+    if (session.design_name) $("aedtDesign").value = session.design_name;
+    if (session.process_id) $("aedtProcessId").value = session.process_id;
+    if (session.grpc_port) $("aedtGrpcPort").value = session.grpc_port;
+    if (session.setups?.length) {
+      $("aedtSetup").value = session.setups[0];
+      const sweeps = session.sweeps?.[session.setups[0]] || [];
+      if (sweeps.length) $("aedtSweep").value = sweeps[0];
+    }
     await refreshState({quiet: true});
-    setOperation("AEDT project session ready");
-    showToast("AEDT session ready");
+    setOperation(
+      `AEDT ${session.version || payload.version} ready - PID ${session.process_id || "attached"}`
+    );
+    showToast(`AEDT ${session.version || payload.version} session ready`);
   } catch (error) {
     setOperation(`AEDT error: ${error.message}`);
     showToast(error.message, true);
@@ -656,16 +681,76 @@ async function setVariables() {
 async function evaluateAedt() {
   try {
     const variables = JSON.parse($("variablesJson").value || "{}");
+    const cores = numericValue("aedtCores", 0);
     setOperation("Running AEDT analysis...");
-    await postJson("/aedt/evaluatedimension", {
+    const data = await postJson("/aedt/evaluatedimension", {
       variables,
-      output_touchstone: $("aedtOutput").value
+      setup_name: $("aedtSetup").value.trim() || null,
+      sweep_name: $("aedtSweep").value.trim() || null,
+      output_touchstone: $("aedtOutput").value,
+      cores: cores || null,
+      blocking: true
     });
-    setOperation("AEDT analysis completed");
-    showToast("AEDT analysis completed");
+    const result = data.result || {};
+    setOperation(`AEDT analysis completed: ${result.setup || "all setups"}`);
+    showToast(`Touchstone exported: ${result.touchstone || "not requested"}`);
   } catch (error) {
     setOperation(`AEDT error: ${error.message}`);
     showToast(error.message, true);
+  }
+}
+
+async function releaseAedt() {
+  try {
+    const closeDesktop = $("aedtSessionMode").value === "new";
+    await postJson("/api/aedt/release", {
+      close_projects: closeDesktop,
+      close_desktop: closeDesktop
+    });
+    $("aedtProcessId").value = "";
+    $("aedtGrpcPort").value = "";
+    await refreshState({quiet: true});
+    setOperation("AEDT session released");
+    showToast("AEDT session released");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function loadAedtInstallations() {
+  try {
+    const data = await getJson("/api/aedt/installations");
+    const select = $("aedtVersion");
+    const current = select.value;
+    select.textContent = "";
+    (data.installations || []).forEach((installation) => {
+      const option = document.createElement("option");
+      option.value = installation.version;
+      option.textContent = `${installation.version} - ${installation.root}`;
+      select.appendChild(option);
+    });
+    if (!select.options.length) {
+      const option = document.createElement("option");
+      option.value = "2026.1";
+      option.textContent = "2026.1 - not detected";
+      select.appendChild(option);
+    }
+    select.value = data.recommended_version || current || "2026.1";
+    const activeSession = (data.running_sessions || []).find(
+      (session) => session.version === select.value && session.grpc_port
+    );
+    if (activeSession) {
+      $("aedtSessionMode").value = "attach";
+      $("aedtMachine").value = "localhost";
+      $("aedtGrpcPort").value = activeSession.grpc_port;
+      $("aedtProcessId").value = activeSession.process_id;
+      $("aedtDisplayMode").value = activeSession.non_graphical
+        ? "non_graphical"
+        : "graphical";
+    }
+    logService("AEDT environment detected", data);
+  } catch (error) {
+    logService("AEDT environment detection failed", {message: error.message});
   }
 }
 
@@ -1024,6 +1109,7 @@ function bindEvents() {
   $("loadVariables").addEventListener("click", loadVariables);
   $("setVariables").addEventListener("click", setVariables);
   $("evaluateAedt").addEventListener("click", evaluateAedt);
+  $("releaseAedt").addEventListener("click", releaseAedt);
   $("connectVna").addEventListener("click", connectVna);
   $("applySweep").addEventListener("click", applySweep);
   $("singleSweep").addEventListener("click", singleSweep);
@@ -1056,7 +1142,8 @@ async function initialize() {
   setInterval(updateClock, 30000);
   await Promise.all([
     refreshState({quiet: true}),
-    calculateAll({quiet: true})
+    calculateAll({quiet: true}),
+    loadAedtInstallations()
   ]);
 }
 

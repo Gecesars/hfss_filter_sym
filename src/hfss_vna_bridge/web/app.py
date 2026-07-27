@@ -67,6 +67,10 @@ def create_app(
     def api_aedt(method: str):
         return _dispatch_aedt(app, method)
 
+    @app.get("/api/aedt/installations")
+    def api_aedt_installations():
+        return _dispatch_aedt(app, "diagnostics")
+
     @app.route("/api/hfss/<method>", methods=["GET", "POST"])
     def api_hfss(method: str):
         return _dispatch_hfss(app, method)

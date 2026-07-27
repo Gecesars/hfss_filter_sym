@@ -65,7 +65,7 @@
             </div>
           </div>
           <div class="version-block">
-            <span>Version 0.2.0</span>
+            <span>Version 0.3.0</span>
             <button class="sidebar-collapse" title="Collapse sidebar">&lt;&lt;</button>
           </div>
 
@@ -213,6 +213,8 @@
                   <select id="responseFamily" aria-label="Response family">
                     <option value="chebyshev">Chebyshev</option>
                     <option value="butterworth">Butterworth</option>
+                    <option value="bessel">Bessel</option>
+                    <option value="elliptic">Elliptic</option>
                   </select>
                   <button class="reset-control" id="resetInput" title="Reset input">R</button>
                 </label>
@@ -368,11 +370,11 @@
           <div class="integration-form">
             <label class="wide-field">
               Project .aedt
-              <input id="aedtProject" value="D:\simulation\painel triband.aedt">
+              <input id="aedtProject" value="D:\dev\HFSS_AUTO\painel triBand.aedt">
             </label>
             <label>
               Design
-              <input id="aedtDesign" value="HFSSDesign1">
+              <input id="aedtDesign" placeholder="Active design">
             </label>
             <label>
               Backend
@@ -380,6 +382,54 @@
                 <option value="simulated">simulated</option>
                 <option value="pyaedt">pyaedt</option>
               </select>
+            </label>
+            <label>
+              AEDT version
+              <select id="aedtVersion">
+                <option value="2026.1">2026 R1</option>
+              </select>
+            </label>
+            <label>
+              Session
+              <select id="aedtSessionMode">
+                <option value="attach">Attach / reuse</option>
+                <option value="new">Start new desktop</option>
+              </select>
+            </label>
+            <label>
+              Display mode
+              <select id="aedtDisplayMode">
+                <option value="graphical">Graphical</option>
+                <option value="non_graphical">Non-graphical</option>
+              </select>
+            </label>
+            <label>
+              gRPC host
+              <input id="aedtMachine" value="localhost">
+            </label>
+            <label>
+              gRPC port
+              <input id="aedtGrpcPort" type="number" placeholder="Auto / new">
+            </label>
+            <label>
+              Process ID fallback
+              <input id="aedtProcessId" type="number" placeholder="Auto">
+            </label>
+            <label>
+              Setup
+              <input id="aedtSetup" placeholder="First available">
+            </label>
+            <label>
+              Sweep
+              <input id="aedtSweep" placeholder="First available">
+            </label>
+            <label>
+              HPC cores
+              <input id="aedtCores" type="number" min="1" placeholder="AEDT default">
+            </label>
+            <label class="check-field">
+              <input id="aedtRemoveLock" type="checkbox">
+              Remove stale project lock
             </label>
             <label class="wide-field">
               Touchstone output
@@ -391,6 +441,7 @@
             <button id="loadVariables">Read Variables</button>
             <button id="setVariables">Apply Variables</button>
             <button class="primary" id="evaluateAedt">Analyze &amp; Export</button>
+            <button id="releaseAedt">Release Session</button>
           </div>
           <textarea id="variablesJson" spellcheck="false">{"arm_scale_a":1.02,"dist_refletor":"21mm"}</textarea>
         </section>

@@ -11,7 +11,9 @@ Browser
   |
   +-- POST /api/synthesis/calculate
   |     -> services.synthesis
-  |          -> series + matrix + topology
+  |          -> engines.filter_engine
+  |               -> SciPy ZPK + g values + physical scaling
+  |                    -> series + matrix + topology + elements
   |
   +-- /api/aedt/*, /aedt/*, /hfss/*
   |     -> SymMatrixDispatcher
@@ -47,9 +49,22 @@ Nao deve:
 - implementar formulas de sintese;
 - escrever Touchstone manualmente.
 
+### `engines.filter_engine`
+
+Implementa o dominio numerico:
+
+- prototipos analogicos SciPy;
+- transformacoes BPF, BSF e LPF;
+- rede reciproca de duas portas;
+- Q finito;
+- atraso pela derivada da fase;
+- valores g e matriz de acoplamento;
+- Q externo e acoplamentos fisicos;
+- escalamento L/C.
+
 ### `services.synthesis`
 
-Recebe uma especificacao sem estado e retorna:
+Valida unidades e orquestra o motor sem estado. Retorna:
 
 - especificacao normalizada;
 - vetores de resposta;
@@ -58,9 +73,7 @@ Recebe uma especificacao sem estado e retorna:
 - dispersao;
 - resumo.
 
-A funcao e deterministica: o mesmo payload produz o mesmo resultado. Isso
-permite cache, testes numericos e futura substituicao por um engine rigoroso sem
-alterar o contrato da UI.
+A funcao e deterministica: o mesmo payload produz o mesmo resultado.
 
 ### `services.symmatrix`
 
@@ -100,6 +113,9 @@ Backends:
 - `PyAedtAdapter`.
 
 O import de PyAEDT e tardio. A aplicacao pode iniciar sem AEDT instalado.
+`installations.py` detecta versoes e sessoes gRPC. O backend 2026.1 suporta
+attach por porta, attach por PID, nova sessao, setup/sweep, HPC, Touchstone,
+relatorios, convergencia, save e limpeza seletiva.
 
 ### `adapters.vna`
 
@@ -171,7 +187,7 @@ A versao atual assume:
 - uma sessao AEDT por processo;
 - um VNA por processo;
 - chamadas de integracao serializadas pelo cliente;
-- calculos analiticos curtos executados na thread Flask.
+- calculos numericos curtos executados na thread Flask.
 
 Antes de habilitar multiplos usuarios ou analyses longas, adicionar:
 
@@ -213,7 +229,9 @@ Testes offline cobrem:
 - criacao dos servidores;
 - health e snapshot;
 - validacao da sintese;
+- conservacao de potencia, return loss, Q e zeros finitos;
 - dimensoes de series, matriz e topologia;
+- contrato PyAEDT 2026 e argumento `output_file`;
 - fluxo AEDT simulado;
 - fluxo VNA simulado;
 - escrita `.s2p`;

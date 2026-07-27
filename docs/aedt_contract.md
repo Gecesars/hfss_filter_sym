@@ -6,11 +6,27 @@ aplicacao independente da API exata do PyAEDT.
 ## Interface
 
 ```python
-connect(project_path, design_name, new_desktop=False, non_graphical=False)
+connect(
+    project_path,
+    design_name,
+    version="2026.1",
+    new_desktop=False,
+    non_graphical=False,
+    machine=None,
+    port=None,
+    aedt_process_id=None,
+)
 list_designs()
+set_active_design(design_name)
 get_variables()
 set_variables(variables)
 analyze(setup_name=None, sweep_name=None, output_touchstone=None)
+session_info()
+save_project()
+create_sparameter_report()
+export_convergence()
+remove_solution_data()
+release()
 ```
 
 ## Backends
@@ -42,7 +58,7 @@ Exemplo HTTP:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/aedt/session `
   -Method Post -ContentType "application/json" `
-  -Body '{"backend":"pyaedt","project_path":"D:\\simulation\\painel triband.aedt","design_name":"HFSSDesign1","new_desktop":false,"non_graphical":false}'
+  -Body '{"backend":"pyaedt","project_path":"D:\\dev\\HFSS_AUTO\\painel triBand.aedt","version":"2026.1","new_desktop":false,"machine":"localhost","port":49152}'
 ```
 
 Campos:
@@ -50,8 +66,12 @@ Campos:
 - `backend`: `pyaedt` ou `simulated`.
 - `project_path`: caminho do `.aedt`; opcional no modo simulado.
 - `design_name`: design HFSS a ativar; opcional.
+- `version`: `2026.1` para AEDT 2026 R1.
 - `new_desktop`: inicia nova sessao AEDT quando `true`.
 - `non_graphical`: tenta usar AEDT sem GUI quando `true`.
+- `machine` e `port`: anexam a uma sessao gRPC existente.
+- `aedt_process_id`: fallback quando nao houver porta.
+- `remove_lock`: somente para lock comprovadamente obsoleto.
 
 ## Variaveis
 
@@ -77,7 +97,7 @@ variavel precisa de unidade, envie a unidade no texto, por exemplo `21mm`.
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/aedt/analyze `
   -Method Post -ContentType "application/json" `
-  -Body '{"setup_name":"Setup1","sweep_name":"Sweep1","output_touchstone":"D:\\simulation\\hfss_export.s2p"}'
+  -Body '{"setup_name":"Setup1","sweep_name":"Sweep1","cores":4,"blocking":true,"output_touchstone":"D:\\simulation\\hfss_export.s2p"}'
 ```
 
 Notas:
@@ -85,6 +105,9 @@ Notas:
 - `setup_name` e recomendado para evitar ambiguidade.
 - `sweep_name` e usado na exportacao quando suportado pelo PyAEDT instalado.
 - `output_touchstone` e opcional.
+- exportacao usa o argumento PyAEDT oficial `output_file`.
+
+Detalhes verificados em [aedt_2026_integration.md](aedt_2026_integration.md).
 
 ## Erros Esperados
 
@@ -93,4 +116,3 @@ Notas:
 - Licenca indisponivel: libere ou configure a licenca HFSS.
 - Design inexistente: revise `design_name`.
 - Variavel inexistente: confirme nomes em `/aedt/variables`.
-

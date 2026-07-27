@@ -23,8 +23,15 @@ class AedtSessionRequest(BaseModel):
     backend: Literal["simulated", "pyaedt"] = "pyaedt"
     project_path: str | None = None
     design_name: str | None = None
+    version: str = "2026.1"
     new_desktop: bool = False
     non_graphical: bool = False
+    close_on_exit: bool = False
+    student_version: bool = False
+    machine: str | None = None
+    port: int | None = None
+    aedt_process_id: int | None = None
+    remove_lock: bool = False
 
 
 class VariableUpdateRequest(BaseModel):
@@ -35,6 +42,11 @@ class AedtAnalyzeRequest(BaseModel):
     setup_name: str | None = None
     sweep_name: str | None = None
     output_touchstone: str | None = None
+    cores: int | None = None
+    tasks: int | None = None
+    gpus: int | None = None
+    blocking: bool = True
+    revert_to_initial_mesh: bool = False
 
 
 class AedtAnalyzeResponse(BaseModel):
@@ -43,6 +55,9 @@ class AedtAnalyzeResponse(BaseModel):
     setup: str | None = None
     sweep: str | None = None
     touchstone: str | None = None
+    solved: bool = True
+    blocking: bool = True
+    session: dict[str, object] = Field(default_factory=dict)
 
 
 class VnaConnectRequest(BaseModel):
@@ -97,4 +112,3 @@ class FrequencyRequest(BaseModel):
 
 class ScalarRequest(BaseModel):
     value: float
-

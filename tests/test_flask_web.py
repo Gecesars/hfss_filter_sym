@@ -131,3 +131,29 @@ def test_symmatrix_hfss_planned_surface() -> None:
 
     assert response.status_code == 200
     assert response.get_json()["status"] == -501
+
+
+def test_aedt_2026_operational_surface_in_simulation() -> None:
+    app = create_app()
+    client = app.test_client()
+
+    opened = client.post(
+        "/aedt/openproject",
+        json={"backend": "simulated", "version": "2026.1"},
+    ).get_json()
+    report = client.post(
+        "/aedt/createreport",
+        json={"expressions": ["dB(S(1,1))"], "setup": "SynMatrix"},
+    ).get_json()
+    convergence = client.post(
+        "/aedt/callconvergence",
+        json={"setup": "SynMatrix", "output_file": "data/convergence.conv"},
+    ).get_json()
+    mesh = client.post("/aedt/callkillmesh", json={"mesh": True}).get_json()
+    saved = client.post("/hfss/saveproject", json={}).get_json()
+
+    assert opened["session"]["version"] == "2026.1"
+    assert report["report"]["expressions"] == ["dB(S(1,1))"]
+    assert convergence["output_file"].endswith("convergence.conv")
+    assert mesh["removed"] is True
+    assert saved["project_path"] == "SIM::AEDT"

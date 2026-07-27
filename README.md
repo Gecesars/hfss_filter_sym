@@ -11,7 +11,7 @@ O objetivo do projeto e fornecer uma base propria, documentada e testavel para:
 - controlar um VNA por SCPI via PyVISA;
 - operar em modo simulado quando AEDT ou hardware nao estiverem disponiveis;
 - integrar scripts, GUIs ou otimizadores sem acoplar a regra de negocio ao AEDT.
-- sintetizar respostas BPF, BSF, LPF e multi-banda no cockpit local;
+- sintetizar respostas BPF, BSF, LPF e multi-banda com NumPy/SciPy;
 - visualizar parametros S, atraso de grupo, potencia, matriz e topologia;
 - editar/exportar matriz e salvar/carregar projetos JSON.
 
@@ -23,11 +23,12 @@ escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 
 ## Status
 
-- Versao da aplicacao: `0.2.0`
+- Versao da aplicacao: `0.3.0`
 - Python: `>=3.14`
 - Servidor padrao: Flask + JavaScript local
 - API tecnica opcional: FastAPI
-- AEDT/HFSS: backend `pyaedt`
+- AEDT/HFSS: backend `pyaedt`, validado com AEDT 2026.1
+- Sintese: prototipos Chebyshev, Butterworth, Bessel e Elliptic
 - VNA: backend `pyvisa`
 - Superficie SymMatrix MVP: `/aedt/<method>`, `/hfss/<method>` e `POST /<method>`
 - Testes offline: backends `simulated`
@@ -259,7 +260,13 @@ Exemplo para abrir o arquivo do painel triband:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8765/aedt/session `
   -Method Post -ContentType "application/json" `
-  -Body '{"backend":"pyaedt","project_path":"D:\\simulation\\painel triband.aedt","design_name":"HFSSDesign1","new_desktop":false,"non_graphical":false}'
+  -Body '{"backend":"pyaedt","project_path":"D:\\dev\\HFSS_AUTO\\painel triBand.aedt","version":"2026.1","new_desktop":false,"machine":"localhost","port":49152}'
+```
+
+Detectar instalacoes e sessoes gRPC:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/api/aedt/installations
 ```
 
 Listar variaveis:
@@ -319,6 +326,7 @@ $env:HFSS_BRIDGE_HOST = "127.0.0.1"
 $env:HFSS_BRIDGE_PORT = "8765"
 $env:HFSS_BRIDGE_AEDT_PROJECT = "D:\simulation\painel triband.aedt"
 $env:HFSS_BRIDGE_AEDT_DESIGN = "HFSSDesign1"
+$env:HFSS_BRIDGE_AEDT_VERSION = "2026.1"
 $env:HFSS_BRIDGE_VNA_BACKEND = "simulated"
 $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
 ```
@@ -330,8 +338,14 @@ $env:HFSS_BRIDGE_VNA_RESOURCE = "SIM::VNA"
 .\.venv\Scripts\python -m ruff check .
 ```
 
-Os testes atuais usam adaptadores simulados e nao exigem AEDT, licenca, VISA ou
-hardware conectado.
+Os testes automatizados usam adaptadores simulados e mocks de contrato. A
+validacao real do AEDT pode ser executada separadamente:
+
+```powershell
+.\.venv\Scripts\python scripts\validate_aedt_2026.py `
+  --project "D:\dev\HFSS_AUTO\painel triBand.aedt" `
+  --attach --machine localhost --port 49152
+```
 
 ## Documentacao
 
@@ -341,6 +355,8 @@ hardware conectado.
 - [docs/professional_ui.md](docs/professional_ui.md): contrato detalhado da interface.
 - [docs/architecture.md](docs/architecture.md): desenho da aplicacao.
 - [docs/aedt_contract.md](docs/aedt_contract.md): contrato AEDT/HFSS.
+- [docs/aedt_2026_integration.md](docs/aedt_2026_integration.md): conexao AEDT 2026 validada.
+- [docs/filter_engine.md](docs/filter_engine.md): equacoes e validacao do motor real.
 - [docs/vna_contract.md](docs/vna_contract.md): contrato VNA/SCPI.
 - [docs/workflows.md](docs/workflows.md): fluxos operacionais.
 - [docs/troubleshooting.md](docs/troubleshooting.md): diagnostico de falhas comuns.

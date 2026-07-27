@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Any
 
 from hfss_vna_bridge.core.models import AdapterState, NetworkPoint
 from hfss_vna_bridge.core.touchstone import write_s2p
@@ -31,10 +32,27 @@ class SimulatedAedtAdapter:
         project_path: str | Path | None = None,
         design_name: str | None = None,
         *,
+        version: str | None = "2026.1",
         new_desktop: bool = False,
         non_graphical: bool = False,
+        close_on_exit: bool = False,
+        student_version: bool = False,
+        machine: str | None = None,
+        port: int | None = None,
+        aedt_process_id: int | None = None,
+        remove_lock: bool = False,
     ) -> AdapterState:
-        del new_desktop, non_graphical
+        del (
+            new_desktop,
+            non_graphical,
+            close_on_exit,
+            student_version,
+            machine,
+            port,
+            aedt_process_id,
+            remove_lock,
+        )
+        self._version = version or "2026.1"
         self._project_path = Path(project_path) if project_path else None
         if design_name:
             self._design_name = design_name
@@ -45,6 +63,17 @@ class SimulatedAedtAdapter:
     def list_designs(self) -> list[str]:
         self._require_connected()
         return [self._design_name]
+
+    def set_active_design(self, design_name: str) -> AdapterState:
+        self._require_connected()
+        self._design_name = design_name
+        self._state = AdapterState(
+            True,
+            "simulated",
+            self._state.resource,
+            self._design_name,
+        )
+        return self._state
 
     def get_variables(self) -> dict[str, str]:
         self._require_connected()
@@ -61,7 +90,14 @@ class SimulatedAedtAdapter:
         setup_name: str | None = None,
         sweep_name: str | None = None,
         output_touchstone: str | Path | None = None,
-    ) -> dict[str, str | None]:
+        *,
+        cores: int | None = None,
+        tasks: int | None = None,
+        gpus: int | None = None,
+        blocking: bool = True,
+        revert_to_initial_mesh: bool = False,
+    ) -> dict[str, Any]:
+        del cores, tasks, gpus, revert_to_initial_mesh
         self._require_connected()
         output = None
         if output_touchstone:
@@ -76,7 +112,86 @@ class SimulatedAedtAdapter:
             "setup": setup_name,
             "sweep": sweep_name,
             "touchstone": str(output) if output else None,
+            "solved": True,
+            "blocking": blocking,
+            "session": self.session_info(),
         }
+
+    def session_info(self) -> dict[str, Any]:
+        self._require_connected()
+        return {
+            "connected": True,
+            "version": getattr(self, "_version", "2026.1"),
+            "version_full": "simulated",
+            "process_id": None,
+            "grpc_port": None,
+            "grpc": False,
+            "install_dir": None,
+            "project_name": self._project_path.stem if self._project_path else "SimulatedProject",
+            "project_file": str(self._project_path) if self._project_path else None,
+            "design_name": self._design_name,
+            "design_type": "HFSS",
+            "solution_type": "Modal",
+            "setups": ["SynMatrix"],
+            "sweeps": {"SynMatrix": ["FreqSweep"]},
+            "owns_desktop": False,
+        }
+
+    def save_project(
+        self,
+        file_name: str | Path | None = None,
+        *,
+        overwrite: bool = True,
+    ) -> str:
+        del overwrite
+        self._require_connected()
+        output = Path(file_name) if file_name else self._project_path
+        return str(output or "SIM::AEDT")
+
+    def create_sparameter_report(
+        self,
+        expressions: list[str] | None = None,
+        *,
+        setup_name: str | None = None,
+        sweep_name: str | None = None,
+        plot_name: str | None = None,
+    ) -> dict[str, Any]:
+        self._require_connected()
+        return {
+            "plot_name": plot_name or "S Parameters",
+            "setup_sweep": f"{setup_name or 'SynMatrix'} : {sweep_name or 'FreqSweep'}",
+            "expressions": expressions or ["dB(S(1,1))", "dB(S(2,1))"],
+        }
+
+    def export_convergence(
+        self,
+        setup_name: str | None = None,
+        output_file: str | Path | None = None,
+    ) -> str:
+        self._require_connected()
+        return str(output_file or f"{setup_name or 'SynMatrix'}.conv")
+
+    def remove_solution_data(
+        self,
+        *,
+        entire_solution: bool = False,
+        field: bool = False,
+        mesh: bool = True,
+        linked_data: bool = False,
+    ) -> bool:
+        del entire_solution, field, mesh, linked_data
+        self._require_connected()
+        return True
+
+    def release(
+        self,
+        *,
+        close_projects: bool = False,
+        close_desktop: bool = False,
+    ) -> bool:
+        del close_projects, close_desktop
+        self._state = AdapterState(False, "simulated", "SIM::AEDT")
+        return True
 
     def _synthetic_network(self) -> list[NetworkPoint]:
         points: list[NetworkPoint] = []

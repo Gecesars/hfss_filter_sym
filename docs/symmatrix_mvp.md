@@ -10,7 +10,7 @@ proprietario foi incorporado.
 O MVP profissional entrega uma superficie unica para:
 
 1. definir uma resposta de filtro;
-2. gerar uma resposta analitica deterministica;
+2. sintetizar uma rede analogica deterministica;
 3. visualizar parametros S, atraso de grupo e potencia;
 4. inspecionar e editar uma matriz de acoplamento;
 5. representar a topologia fisica correspondente;
@@ -19,15 +19,15 @@ O MVP profissional entrega uma superficie unica para:
 8. salvar e carregar o estado de projeto;
 9. preservar os contratos HTTP necessarios para expansao.
 
-O calculo atual e um modelo analitico original para desenvolvimento da interface
-e dos fluxos. Ele nao substitui um solver eletromagnetico, uma sintese de
-polinomios completa nem o resultado medido em bancada.
+O calculo atual usa prototipos analogicos SciPy, transformacao de frequencia,
+parametros S complexos, valores g e escalamento fisico. Ele nao substitui o
+solver eletromagnetico nem o resultado medido em bancada.
 
 ## Estado por Modulo
 
-| Modulo | Estado 0.2.0 | Contrato atual | Proxima entrega |
+| Modulo | Estado 0.3.0 | Contrato atual | Proxima entrega |
 | --- | --- | --- | --- |
-| Synthesis / Single | Funcional | Entrada, zeros, dispersao, grafico, matriz e topologia | Prototipos polinomiais rigorosos |
+| Synthesis / Single | Funcional | Prototipos reais, zeros, grafico, matriz, Qe e elementos | Sintese Cameron generalizada |
 | Synthesis / Dip-MUX | Planejado | Item de navegacao e tipo `MULTI` inicial | Canais, junction e composicao |
 | 3D Modeling / Cavity | Parcial | Rotas HFSS reservadas e AEDT funcional | Gerador parametrico de cavidade |
 | 3D Modeling / Planar | Parcial | Rotas HFSS reservadas e AEDT funcional | Microstrip, SIW e layout |
@@ -232,10 +232,10 @@ Familias reservadas:
 
 ## Criterios para a Proxima Fase
 
-1. substituir a aproximacao analitica por sintese de prototipo validada;
+1. implementar sintese Cameron generalizada para matrizes com muitos zeros;
 2. importar Touchstone real no projeto;
 3. comparar alvo, HFSS e VNA no mesmo grafico;
 4. implementar fila de jobs AEDT com progresso e cancelamento;
 5. persistir projetos no servidor com historico;
 6. implementar tuning com objetivos, limites e rollback;
-7. adicionar testes de integracao marcados para AEDT e instrumentos reais.
+7. adicionar testes de solve marcados para AEDT e instrumentos reais.

@@ -16,13 +16,14 @@ Todas as rotas de comando usam JSON.
 
 ### `POST /api/synthesis/calculate`
 
-Executa a sintese analitica sem acessar AEDT ou VNA.
+Executa a sintese numerica de prototipo sem acessar AEDT ou VNA.
 
 Payload:
 
 ```json
 {
   "filter_type": "BPF",
+  "response_family": "chebyshev",
   "order": 4,
   "return_loss_db": 25,
   "f0_ghz": 1.0,
@@ -32,6 +33,8 @@ Payload:
   "shift_mhz": 0,
   "delta_bandwidth_mhz": 0,
   "unloaded_q": null,
+  "impedance_ohm": 50,
+  "input_power_w": 0.1,
   "points": 401,
   "dispersion": "symmetric",
   "zeros": [
@@ -54,6 +57,11 @@ Resposta:
 {
   "status": 0,
   "ok": true,
+  "engine": {
+    "name": "coupled-resonator-prototype",
+    "numerics": "NumPy/SciPy analog ZPK",
+    "simulated": false
+  },
   "specification": {
     "filter_type": "BPF",
     "order": 4,
@@ -73,6 +81,8 @@ Resposta:
     "values": [],
     "unit": "normalized"
   },
+  "prototype": {},
+  "elements": [],
   "topology": {
     "nodes": [],
     "edges": []
@@ -105,13 +115,26 @@ Resposta:
 ```json
 {
   "ok": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "aedt": {"connected": false, "backend": "simulated", "resource": null, "detail": null},
   "vna": {"connected": false, "backend": "simulated", "resource": "SIM::VNA", "detail": null}
 }
 ```
 
 ## AEDT/HFSS
+
+### `GET /api/aedt/installations`
+
+Detecta versoes instaladas e sessoes `ansysedt.exe` com porta gRPC.
+
+### `POST /api/aedt/sessioninfo`
+
+Retorna versao, PID, porta, projeto, design, setups e sweeps da sessao ativa.
+
+### `POST /api/aedt/release`
+
+Libera a sessao. `close_projects` e `close_desktop` devem ser `false` para uma
+sessao anexada e `true` para uma sessao criada pelo servidor.
 
 ### Superficie SymMatrix Flask
 
@@ -167,10 +190,13 @@ Payload PyAEDT:
 ```json
 {
   "backend": "pyaedt",
-  "project_path": "D:\\simulation\\painel triband.aedt",
-  "design_name": "HFSSDesign1",
+  "project_path": "D:\\dev\\HFSS_AUTO\\painel triBand.aedt",
+  "version": "2026.1",
+  "machine": "localhost",
+  "port": 49152,
   "new_desktop": false,
-  "non_graphical": false
+  "non_graphical": false,
+  "remove_lock": false
 }
 ```
 
@@ -207,6 +233,8 @@ Payload:
 {
   "setup_name": "Setup1",
   "sweep_name": "Sweep1",
+  "cores": 4,
+  "blocking": true,
   "output_touchstone": "D:\\simulation\\hfss_export.s2p"
 }
 ```
