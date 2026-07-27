@@ -1,112 +1,223 @@
 # Arquitetura
 
-O projeto e uma ponte local entre clientes externos, AEDT/HFSS e VNA. A
-aplicacao mantem dependencias de hardware isoladas em adaptadores para que o
-restante do codigo possa ser testado sem AEDT, VISA ou instrumentos fisicos.
+O HFSS Filter Studio e uma aplicacao local em camadas para sintese de filtros,
+automacao AEDT/HFSS e aquisicao VNA. Dependencias de solver e hardware ficam
+isoladas para que interface, contratos e testes funcionem offline.
 
-## Camadas
-
-1. `web`: Flask, SocketIO MVP e interface JavaScript local.
-2. `services`: despacho compativel com o modelo SymMatrix.
-3. `api`: FastAPI tecnica opcional, preservada para clientes REST modernos.
-4. `core`: tipos compartilhados, estado de runtime e escrita Touchstone.
-5. `adapters.aedt`: backends AEDT/HFSS.
-6. `adapters.vna`: backends VNA/SCPI.
-7. `tests`: testes offline com adaptadores simulados.
-
-## Fluxo de Dependencias
+## Visao Geral
 
 ```text
-Cliente HTTP
-  -> Flask routes ou FastAPI routes
-    -> SymMatrixDispatcher
-    -> RuntimeRegistry
-      -> AedtAdapter ou VnaAdapter
-        -> PyAEDT, PyVISA ou simulador
+Browser
+  |
+  +-- POST /api/synthesis/calculate
+  |     -> services.synthesis
+  |          -> series + matrix + topology
+  |
+  +-- /api/aedt/*, /aedt/*, /hfss/*
+  |     -> SymMatrixDispatcher
+  |          -> RuntimeRegistry
+  |               -> SimulatedAedtAdapter ou PyAedtAdapter
+  |
+  +-- /api/vna/*, /vna/*, /*
+        -> SymMatrixDispatcher
+             -> RuntimeRegistry
+                  -> SimulatedVnaAdapter ou PyVisaVnaAdapter
 ```
 
-As rotas nao importam AEDT ou PyVISA diretamente. Esses imports ficam nos
-adaptadores reais e sao tardios. Isso permite iniciar a aplicacao mesmo sem AEDT
-instalado.
+O caminho de sintese nao acessa AEDT ou VNA. O caminho de integracao nao depende
+do DOM ou de estado do navegador.
 
-## Modelo Flask/JS
+## Pacotes
 
-O servidor Flask e o ponto principal do MVP. Ele expoe:
+### `web`
 
-- `GET /`: painel JavaScript local;
-- `GET /health`: estado geral;
-- `GET /api/state`: snapshot para a UI;
-- `POST /<method>`: superficie VNA compativel;
-- `POST /aedt/<method>`: superficie AEDT compativel;
-- `POST /hfss/<method>`: superficie HFSS reservada/compatibilidade;
-- eventos SocketIO reservados para tuning e otimizacao.
+Responsabilidades:
 
-## RuntimeRegistry
+- criar o servidor Flask;
+- servir HTML, CSS e JavaScript;
+- validar o envelope HTTP;
+- expor aliases REST e de compatibilidade;
+- hospedar eventos SocketIO;
+- transformar excecoes conhecidas em resposta JSON.
 
-`RuntimeRegistry` guarda os adaptadores ativos. Quando um cliente chama
-`/aedt/session` ou `/vna/connect`, o adaptador anterior e substituido por um novo
-backend.
+Nao deve:
 
-Essa decisao simplifica o servidor:
+- conter comandos SCPI;
+- importar PyAEDT diretamente;
+- implementar formulas de sintese;
+- escrever Touchstone manualmente.
 
-- uma sessao AEDT ativa por processo;
-- um VNA ativo por processo;
-- troca explicita de backend via API;
-- testes previsiveis com estado isolado por instancia de app.
+### `services.synthesis`
 
-## Adaptadores
+Recebe uma especificacao sem estado e retorna:
 
-### AEDT
+- especificacao normalizada;
+- vetores de resposta;
+- matriz;
+- topologia;
+- dispersao;
+- resumo.
 
-Contrato principal:
+A funcao e deterministica: o mesmo payload produz o mesmo resultado. Isso
+permite cache, testes numericos e futura substituicao por um engine rigoroso sem
+alterar o contrato da UI.
 
-- conectar sessao;
-- listar designs;
-- ler variaveis;
-- escrever variaveis;
-- rodar analise;
-- exportar Touchstone quando solicitado.
+### `services.symmatrix`
+
+Traduz nomes e formatos de interoperabilidade para os contratos internos.
+Mantem:
+
+- estado complementar da sessao AEDT;
+- ultima medicao VNA;
+- configuracoes que nao pertencem ao adaptador;
+- lista de metodos implementados e reservados.
+
+Metodos sao normalizados removendo `-` e `_` e convertendo para minusculas.
+
+### `core`
+
+Contem tipos estaveis:
+
+- `AdapterState`;
+- `SweepConfig`;
+- `NetworkPoint`;
+- `RuntimeRegistry`;
+- escrita Touchstone.
+
+### `adapters.aedt`
+
+Contrato:
+
+- abrir sessao;
+- listar e selecionar design;
+- ler e escrever variaveis;
+- analisar;
+- exportar Touchstone.
 
 Backends:
 
-- `SimulatedAedtAdapter`
-- `PyAedtAdapter`
+- `SimulatedAedtAdapter`;
+- `PyAedtAdapter`.
 
-### VNA
+O import de PyAEDT e tardio. A aplicacao pode iniciar sem AEDT instalado.
 
-Contrato principal:
+### `adapters.vna`
 
-- conectar instrumento;
+Contrato:
+
+- conectar;
+- consultar estado;
 - resetar;
 - configurar sweep;
-- executar sweep unico;
+- medir;
 - salvar Touchstone.
 
 Backends:
 
-- `SimulatedVnaAdapter`
-- `PyVisaVnaAdapter`
+- `SimulatedVnaAdapter`;
+- `PyVisaVnaAdapter`.
+
+O adaptador real concentra comandos SCPI e a sessao VISA.
+
+### `api`
+
+FastAPI permanece como servidor tecnico opcional. Ele e util para Swagger e
+clientes REST modernos, mas nao serve o cockpit Flask.
+
+## Estado
+
+### Servidor
+
+Uma instancia Flask possui um `RuntimeRegistry`:
+
+- um adaptador AEDT ativo;
+- um adaptador VNA ativo;
+- uma configuracao de sweep;
+- uma ultima medicao.
+
+Trocar backend substitui o adaptador do dominio correspondente.
+
+### Navegador
+
+O frontend possui estado efemero para:
+
+- especificacao em edicao;
+- resposta calculada;
+- matriz editada;
+- projeto sujo;
+- medicao VNA para overlay;
+- marcador e visibilidade de curvas.
+
+Esse estado e serializado pelo formato de projeto JSON. Estado de conexao nunca
+e restaurado do arquivo.
+
+## Contratos de Erro
+
+| Status interno | HTTP | Significado |
+| --- | --- | --- |
+| `0` | 200 | Operacao concluida |
+| `-400` | 400 | Payload de sintese invalido |
+| `-404` | 200 | Metodo fora da superficie conhecida |
+| `-501` | 200 | Metodo conhecido e planejado |
+| `-500` | 500 | Falha de backend ou conversao |
+
+Endpoints de compatibilidade preservam HTTP 200 para metodos planejados porque
+clientes legados inspecionam o campo `status`.
+
+## Concorrencia
+
+A versao atual assume:
+
+- uma sessao AEDT por processo;
+- um VNA por processo;
+- chamadas de integracao serializadas pelo cliente;
+- calculos analiticos curtos executados na thread Flask.
+
+Antes de habilitar multiplos usuarios ou analyses longas, adicionar:
+
+1. fila de jobs;
+2. identificador de projeto/sessao;
+3. lock por adaptador;
+4. armazenamento de progresso;
+5. cancelamento cooperativo.
+
+## Seguranca
+
+O servidor usa `127.0.0.1` por padrao. Nao expor em `0.0.0.0` sem:
+
+- autenticacao;
+- validacao de origem;
+- allowlist de pastas;
+- limites de payload;
+- protecao para operacoes AEDT e VISA;
+- TLS quando houver trafego fora da maquina.
+
+O frontend nao recebe credenciais. Enderecos VISA e caminhos AEDT sao enviados
+somente ao servidor local.
 
 ## Touchstone
 
-O modulo `core.touchstone` escreve `.s2p` em formato:
+`core.touchstone` escreve:
 
 ```text
 # Hz S RI R 50
 ```
 
-Os pontos sao representados por `NetworkPoint`, sempre em Hz e numeros complexos
-para parametros S.
+`NetworkPoint` usa frequencia em Hz e parametros S complexos. Conversoes para dB
+acontecem na borda de apresentacao.
 
-## Estrategia de Testes
+## Testes
 
-Os testes usam apenas simuladores. Isso cobre:
+Testes offline cobrem:
 
-- criacao da API;
-- health check;
-- ciclo VNA basico;
-- escrita de Touchstone;
-- ciclo AEDT basico de variaveis.
+- criacao dos servidores;
+- health e snapshot;
+- validacao da sintese;
+- dimensoes de series, matriz e topologia;
+- fluxo AEDT simulado;
+- fluxo VNA simulado;
+- escrita `.s2p`;
+- endpoints planejados.
 
-Testes com AEDT e VNA reais devem ser adicionados como testes manuais ou
-marcados como integracao, pois dependem de licenca, hardware e laboratorio.
+Testes de integracao reais devem ser opt-in e separados por marcadores porque
+dependem de licenca, desktop AEDT, VISA e equipamento.

@@ -7,6 +7,7 @@ from flask_socketio import SocketIO, emit
 
 from hfss_vna_bridge.core.registry import RuntimeRegistry
 from hfss_vna_bridge.services.symmatrix import SymMatrixDispatcher
+from hfss_vna_bridge.services.synthesis import synthesize_filter
 from hfss_vna_bridge.settings import Settings
 
 
@@ -27,6 +28,10 @@ def create_app(
     def index() -> str:
         return render_template("index.html")
 
+    @app.get("/favicon.ico")
+    def favicon():
+        return "", 204
+
     @app.get("/health")
     def health():
         return _json(app.config["DISPATCHER"].health())
@@ -34,6 +39,13 @@ def create_app(
     @app.get("/api/state")
     def api_state():
         return _json(app.config["DISPATCHER"].snapshot())
+
+    @app.post("/api/synthesis/calculate")
+    def api_synthesis_calculate():
+        try:
+            return _json(synthesize_filter(_payload()))
+        except (TypeError, ValueError) as exc:
+            return _json({"status": -400, "ok": False, "message": str(exc)}, 400)
 
     @app.get("/ping")
     def ping():

@@ -12,6 +12,82 @@ disponivel com `--server fastapi`.
 
 Todas as rotas de comando usam JSON.
 
+## Filter Synthesis
+
+### `POST /api/synthesis/calculate`
+
+Executa a sintese analitica sem acessar AEDT ou VNA.
+
+Payload:
+
+```json
+{
+  "filter_type": "BPF",
+  "order": 4,
+  "return_loss_db": 25,
+  "f0_ghz": 1.0,
+  "bandwidth_ghz": 0.05,
+  "start_ghz": 0.875,
+  "stop_ghz": 1.125,
+  "shift_mhz": 0,
+  "delta_bandwidth_mhz": 0,
+  "unloaded_q": null,
+  "points": 401,
+  "dispersion": "symmetric",
+  "zeros": [
+    {"frequency_ghz": 1.08, "depth_db": 60}
+  ]
+}
+```
+
+Campos obrigatorios na pratica sao normalizados com defaults. Limites:
+
+- `filter_type`: `BPF`, `BSF`, `LPF` ou `MULTI`;
+- `order`: 1 a 12;
+- `points`: 101 a 2001;
+- frequencias e largura de banda: positivas;
+- `stop_ghz`: maior que `start_ghz`.
+
+Resposta:
+
+```json
+{
+  "status": 0,
+  "ok": true,
+  "specification": {
+    "filter_type": "BPF",
+    "order": 4,
+    "effective_f0_ghz": 1.0,
+    "effective_bandwidth_ghz": 0.05
+  },
+  "series": {
+    "frequencies_ghz": [],
+    "s11_db": [],
+    "s21_db": [],
+    "s22_db": [],
+    "group_delay_ns": [],
+    "power_w": []
+  },
+  "matrix": {
+    "labels": ["S", "1", "2", "3", "4", "L"],
+    "values": [],
+    "unit": "normalized"
+  },
+  "topology": {
+    "nodes": [],
+    "edges": []
+  },
+  "dispersion": {},
+  "summary": {}
+}
+```
+
+Payload invalido retorna HTTP 400 e:
+
+```json
+{"status": -400, "ok": false, "message": "validation message"}
+```
+
 ## Health
 
 ### `GET /health`

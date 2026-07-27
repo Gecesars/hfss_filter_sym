@@ -11,7 +11,51 @@ def test_flask_health_and_index() -> None:
     assert health.status_code == 200
     assert health.get_json()["supported"]["vna"]
     assert index.status_code == 200
-    assert b"HFSS VNA Bridge" in index.data
+    assert b"HFSS Filter Studio" in index.data
+    assert b"Coupling Matrix" in index.data
+
+
+def test_filter_synthesis_returns_chart_matrix_and_topology() -> None:
+    app = create_app()
+    client = app.test_client()
+
+    response = client.post(
+        "/api/synthesis/calculate",
+        json={
+            "filter_type": "BPF",
+            "order": 4,
+            "return_loss_db": 25,
+            "f0_ghz": 1,
+            "bandwidth_ghz": 0.05,
+            "start_ghz": 0.875,
+            "stop_ghz": 1.125,
+            "points": 301,
+            "zeros": [{"frequency_ghz": 1.08, "depth_db": 60}],
+        },
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["status"] == 0
+    assert len(data["series"]["frequencies_ghz"]) == 301
+    assert len(data["series"]["s11_db"]) == 301
+    assert data["matrix"]["labels"] == ["S", "1", "2", "3", "4", "L"]
+    assert len(data["matrix"]["values"]) == 6
+    assert len(data["topology"]["nodes"]) == 6
+    assert any(edge["kind"] == "cross" for edge in data["topology"]["edges"])
+
+
+def test_filter_synthesis_rejects_invalid_frequency_span() -> None:
+    app = create_app()
+    client = app.test_client()
+
+    response = client.post(
+        "/api/synthesis/calculate",
+        json={"start_ghz": 1.2, "stop_ghz": 1.0},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == -400
 
 
 def test_symmatrix_vna_compatibility_flow(tmp_path) -> None:

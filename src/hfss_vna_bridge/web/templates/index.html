@@ -1,70 +1,373 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HFSS VNA Bridge</title>
+    <title>HFSS Filter Studio - Local</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">HV</div>
-        <div>
-          <h1>HFSS VNA Bridge</h1>
-          <p>Flask local server</p>
+    <div class="desktop-shell">
+      <header class="window-bar">
+        <div class="window-title">
+          <span class="window-logo">HF</span>
+          <strong>HFSS Filter Studio</strong>
+          <span>- Local Engineering Workspace</span>
         </div>
-      </div>
-      <nav class="top-actions" aria-label="Acoes principais">
-        <button class="icon-button" id="refreshState" title="Atualizar estado">
-          <span aria-hidden="true">&#8635;</span>
-          <span>Atualizar</span>
-        </button>
-        <a class="icon-link" href="/health" title="Abrir health JSON">
-          <span aria-hidden="true">{} </span>
-          <span>Health</span>
-        </a>
-      </nav>
-    </header>
+        <div class="window-state">
+          <span id="clock"></span>
+          <span class="window-control">_</span>
+          <span class="window-control">[]</span>
+          <span class="window-control">x</span>
+        </div>
+      </header>
 
-    <main class="shell">
-      <section class="status-grid" aria-label="Estado">
-        <article class="status-tile">
-          <span class="tile-label">AEDT</span>
-          <strong id="aedtState">-</strong>
-          <small id="aedtDetail">-</small>
-        </article>
-        <article class="status-tile">
-          <span class="tile-label">VNA</span>
-          <strong id="vnaState">-</strong>
-          <small id="vnaDetail">-</small>
-        </article>
-        <article class="status-tile">
-          <span class="tile-label">Sweep</span>
-          <strong id="sweepRange">-</strong>
-          <small id="sweepDetail">-</small>
-        </article>
+      <section class="command-bar" aria-label="Project commands">
+        <div class="command-group command-primary">
+          <button class="command-button save-button" id="saveProject">Save</button>
+          <button class="icon-command save-menu" id="saveMenu" title="Project options">...</button>
+        </div>
+        <div class="project-name" id="projectName">Unsaved Project</div>
+        <button class="command-button subtle-button" id="refreshState">
+          <span class="button-icon">R</span>
+          Refresh
+        </button>
+        <label class="frequency-box">
+          <span class="sr-only">Start frequency</span>
+          <input id="startGhz" type="number" step="0.001" value="0.875">
+          <b>GHz</b>
+        </label>
+        <label class="frequency-box">
+          <span class="sr-only">Stop frequency</span>
+          <input id="stopGhz" type="number" step="0.001" value="1.125">
+          <b>GHz</b>
+        </label>
+        <button class="command-button calculate-button" id="calculateAll">
+          <span class="button-icon">#</span>
+          Calculate All
+        </button>
+        <div class="filter-modes" role="group" aria-label="Filter type">
+          <button class="mode-button active" data-filter-type="BPF">BPF</button>
+          <button class="mode-button" data-filter-type="BSF">BSF</button>
+          <button class="mode-button" data-filter-type="LPF">LPF</button>
+          <button class="mode-button" data-filter-type="MULTI">Multi</button>
+        </div>
+        <button class="icon-command collapse-command" id="toggleSetup" title="Collapse definition panels">^</button>
       </section>
 
-      <section class="workspace">
-        <aside class="panel rail" aria-label="Modulos">
-          <button class="rail-tab active" data-panel="aedtPanel">AEDT</button>
-          <button class="rail-tab" data-panel="vnaPanel">VNA</button>
-          <button class="rail-tab" data-panel="methodsPanel">Metodos</button>
-          <button class="rail-tab" data-panel="logPanel">Log</button>
-        </aside>
+      <div class="workbench">
+        <aside class="module-sidebar">
+          <div class="product-mark">
+            <div class="product-symbol">HF</div>
+            <div>
+              <strong>FILTER STUDIO</strong>
+              <span>HFSS / VNA</span>
+            </div>
+          </div>
+          <div class="version-block">
+            <span>Version 0.2.0</span>
+            <button class="sidebar-collapse" title="Collapse sidebar">&lt;&lt;</button>
+          </div>
 
-        <section class="panel content-panel active" id="aedtPanel">
-          <div class="panel-heading">
-            <h2>AEDT/HFSS</h2>
-            <button class="icon-button" id="connectAedtSim" title="Conectar AEDT simulado">
-              <span aria-hidden="true">&#9679;</span>
-              <span>Simulado</span>
+          <nav class="module-nav" aria-label="Engineering modules">
+            <section class="nav-section open">
+              <button class="nav-heading" data-nav-toggle>
+                <span class="nav-icon">O</span>
+                Synthesis
+                <span class="nav-chevron">^</span>
+              </button>
+              <button class="nav-item active" data-module="single">
+                <span class="nav-item-icon">Y</span>
+                Single
+              </button>
+              <button class="nav-item" data-module="dipmux">
+                <span class="nav-item-icon">M</span>
+                Dip/MUX
+              </button>
+            </section>
+
+            <section class="nav-section open">
+              <button class="nav-heading" data-nav-toggle>
+                <span class="nav-icon">3D</span>
+                3D Modeling
+                <span class="nav-chevron">^</span>
+              </button>
+              <button class="nav-item" data-module="cavity">
+                <span class="nav-item-icon">C</span>
+                Cavity
+              </button>
+              <button class="nav-item" data-module="planar">
+                <span class="nav-item-icon">P</span>
+                Planar
+              </button>
+            </section>
+
+            <section class="nav-section open">
+              <button class="nav-heading" data-nav-toggle>
+                <span class="nav-icon">OP</span>
+                Optimization
+                <span class="nav-chevron">^</span>
+              </button>
+              <button class="nav-item" data-module="cat">
+                <span class="nav-item-icon">T</span>
+                CAT
+              </button>
+              <button class="nav-item" data-module="intelligent">
+                <span class="nav-item-icon">I</span>
+                Intelligent Optimization
+              </button>
+            </section>
+
+            <section class="nav-section open">
+              <button class="nav-heading" data-nav-toggle>
+                <span class="nav-icon">TV</span>
+                Test &amp; Tuning
+                <span class="nav-chevron">^</span>
+              </button>
+              <button class="nav-item" data-module="tuning">
+                <span class="nav-item-icon">F</span>
+                Filter Tuning
+              </button>
+            </section>
+
+            <section class="nav-section open">
+              <button class="nav-heading" data-nav-toggle>
+                <span class="nav-icon">TB</span>
+                Toolbox
+                <span class="nav-chevron">^</span>
+              </button>
+              <button class="nav-item" data-module="montecarlo">
+                <span class="nav-item-icon">MC</span>
+                Monte Carlo
+              </button>
+              <button class="nav-item" data-module="optimizer">
+                <span class="nav-item-icon">O</span>
+                Optimization
+              </button>
+              <button class="nav-item" data-module="tlcalculator">
+                <span class="nav-item-icon">TL</span>
+                TL Calculator
+              </button>
+            </section>
+
+            <button class="nav-heading standalone" data-module="projects">
+              <span class="nav-icon">PM</span>
+              Project Management
+            </button>
+            <button class="nav-heading standalone" data-module="library">
+              <span class="nav-icon">EL</span>
+              e-Library
+            </button>
+          </nav>
+
+          <div class="integration-status">
+            <button class="integration-line" data-integration-tab="aedt">
+              <span class="status-dot simulated" id="aedtDot"></span>
+              <span>AEDT</span>
+              <b id="aedtState">SIM</b>
+            </button>
+            <button class="integration-line" data-integration-tab="vna">
+              <span class="status-dot simulated" id="vnaDot"></span>
+              <span>VNA</span>
+              <b id="vnaState">SIM</b>
             </button>
           </div>
-          <div class="form-grid">
-            <label>
-              Projeto .aedt
+        </aside>
+
+        <main class="engineering-workspace">
+          <section class="definition-grid" id="definitionGrid">
+            <section class="tool-panel input-panel">
+              <header class="panel-title">
+                <span class="panel-title-icon">E</span>
+                <h2>Input</h2>
+              </header>
+              <div class="parameter-table">
+                <label class="parameter-row split-row">
+                  <span>Filter Order:</span>
+                  <input id="filterOrder" type="number" min="1" max="12" value="4">
+                  <span>RL</span>
+                  <input id="returnLoss" type="number" min="1" step="0.1" value="25">
+                  <b>dB</b>
+                </label>
+                <label class="parameter-row">
+                  <button class="row-toggle active" type="button" data-toggle-target="f0Ghz">F0</button>
+                  <input id="f0Ghz" type="number" step="0.001" value="1">
+                  <b>GHz</b>
+                </label>
+                <label class="parameter-row">
+                  <button class="row-toggle active" type="button" data-toggle-target="bandwidthGhz">BW</button>
+                  <input id="bandwidthGhz" type="number" min="0.0001" step="0.001" value="0.05">
+                  <b>GHz</b>
+                </label>
+                <div class="parameter-row shift-row">
+                  <span>Shift (MHz)</span>
+                  <span>DF</span>
+                  <input id="shiftMhz" type="number" step="0.1" value="0">
+                  <span>DBW</span>
+                  <input id="deltaBandwidthMhz" type="number" step="0.1" value="0">
+                  <button class="mini-apply" id="applyShift" title="Apply frequency shift">+</button>
+                </div>
+                <label class="parameter-row">
+                  <span>Unloaded Q</span>
+                  <input id="unloadedQ" type="text" value="Infinity">
+                  <select id="responseFamily" aria-label="Response family">
+                    <option value="chebyshev">Chebyshev</option>
+                    <option value="butterworth">Butterworth</option>
+                  </select>
+                  <button class="reset-control" id="resetInput" title="Reset input">R</button>
+                </label>
+              </div>
+            </section>
+
+            <section class="tool-panel zeros-panel">
+              <header class="panel-title">
+                <span class="panel-title-icon">Z</span>
+                <h2>Transmission Zeros</h2>
+                <button class="panel-action" id="addZero" title="Add transmission zero">+</button>
+                <b>GHz</b>
+              </header>
+              <div class="zero-toolbar">
+                <select id="zeroPreset">
+                  <option value="finite">Pure Finite Zero (Frequency)</option>
+                  <option value="complex">Complex Pair</option>
+                  <option value="none">No Transmission Zero</option>
+                </select>
+              </div>
+              <div class="zero-list" id="zeroList">
+                <div class="zero-empty" id="zeroEmpty">No finite transmission zeros</div>
+              </div>
+            </section>
+
+            <section class="tool-panel topology-controls">
+              <div class="topology-block">
+                <header class="panel-title">
+                  <span class="panel-title-icon">T</span>
+                  <h2>Physical Topology</h2>
+                </header>
+                <button class="wide-command" id="editTopology">Edit Topology</button>
+              </div>
+              <div class="dispersion-block">
+                <header class="panel-title">
+                  <span class="panel-title-icon">D</span>
+                  <h2>Filter Dispersion</h2>
+                </header>
+                <div class="dispersion-modes" role="group" aria-label="Dispersion mode">
+                  <button class="dispersion-button active" data-dispersion="symmetric">/|\</button>
+                  <button class="dispersion-button" data-dispersion="input">/|</button>
+                  <button class="dispersion-button" data-dispersion="output">|\</button>
+                  <button class="dispersion-button" data-dispersion="both">/\/</button>
+                  <input id="dispersionValue" type="number" value="0" step="0.01">
+                </div>
+                <button class="apply-dispersion" id="applyDispersion">Apply Dispersion</button>
+              </div>
+            </section>
+
+            <section class="tool-panel topology-view">
+              <svg id="topologyDiagram" role="img" aria-label="Filter coupling topology"></svg>
+            </section>
+          </section>
+
+          <section class="results-grid">
+            <section class="result-panel chart-panel">
+              <div class="result-tabs" role="tablist" aria-label="Analysis view">
+                <button class="result-tab active" data-chart-mode="sparameter">S Parameter</button>
+                <button class="result-tab" data-chart-mode="groupdelay">Group Delay</button>
+                <button class="result-tab" data-chart-mode="power">Power Analysis</button>
+              </div>
+              <div class="chart-toolbar">
+                <label>
+                  <input id="chartFloor" type="number" value="-70" step="5">
+                </label>
+                <button id="setChartFloor">Set</button>
+                <button id="resetChart">Reset</button>
+                <span class="chart-title" id="chartTitle">S-Parameter</span>
+                <button class="marker-command" id="toggleMarker">Marker</button>
+              </div>
+              <div class="chart-stage">
+                <canvas id="responseChart"></canvas>
+                <div class="chart-watermark">HFSS FILTER STUDIO</div>
+                <div class="chart-tooltip" id="chartTooltip"></div>
+              </div>
+              <div class="chart-legend" id="chartLegend">
+                <button class="legend-item active" data-series="s11">
+                  <span class="legend-line s11"></span>
+                  Matrix - S11
+                </button>
+                <button class="legend-item active" data-series="s21">
+                  <span class="legend-line s21"></span>
+                  Matrix - S21
+                </button>
+                <button class="legend-item" data-series="s22">
+                  <span class="legend-line s22"></span>
+                  Matrix - S22
+                </button>
+              </div>
+            </section>
+
+            <section class="result-panel matrix-panel">
+              <div class="matrix-header">
+                <div class="result-tabs" role="tablist" aria-label="Matrix view">
+                  <button class="matrix-tab active" data-matrix-tab="matrix">Coupling Matrix</button>
+                  <button class="matrix-tab" data-matrix-tab="specification">Specification</button>
+                </div>
+                <button class="marker-command matrix-marker" id="matrixMarker">Marker</button>
+              </div>
+              <div class="matrix-summary">
+                <span>Input GD</span>
+                <b id="inputGroupDelay">0.000</b>
+                <em>ns</em>
+                <span>Output GD</span>
+                <b id="outputGroupDelay">0.000</b>
+                <em>ns</em>
+                <strong>NORM</strong>
+              </div>
+              <div class="matrix-content active" id="matrixContent">
+                <div class="matrix-table-wrap">
+                  <table class="coupling-matrix" id="couplingMatrix"></table>
+                </div>
+              </div>
+              <div class="matrix-content" id="specificationContent">
+                <dl class="specification-list" id="specificationList"></dl>
+              </div>
+              <div class="matrix-actions">
+                <button class="icon-command" id="matrixFit" title="Fit matrix">X</button>
+                <button class="command-button" id="editMatrix">Edit Matrix</button>
+                <button class="command-button" id="exportMatrix">Export</button>
+                <button class="command-button" id="loadProject">Load Data</button>
+                <button class="command-button" id="editSign">Edit Sign</button>
+                <input id="projectFile" type="file" accept=".json" hidden>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+
+      <footer class="status-bar">
+        <span id="operationStatus">Ready</span>
+        <span id="calculationStatus">401 points | BPF | Order 4</span>
+        <button id="openIntegration">AEDT / VNA Integration</button>
+      </footer>
+    </div>
+
+    <dialog class="integration-dialog" id="integrationDialog">
+      <div class="dialog-shell">
+        <header class="dialog-header">
+          <div>
+            <strong>AEDT / VNA Integration</strong>
+            <span>Local service adapters</span>
+          </div>
+          <button class="dialog-close" id="closeIntegration" title="Close">x</button>
+        </header>
+        <div class="integration-tabs">
+          <button class="integration-tab active" data-integration-view="aedtView">AEDT / HFSS</button>
+          <button class="integration-tab" data-integration-view="vnaView">VNA</button>
+          <button class="integration-tab" data-integration-view="logView">Service Log</button>
+        </div>
+
+        <section class="integration-view active" id="aedtView">
+          <div class="integration-form">
+            <label class="wide-field">
+              Project .aedt
               <input id="aedtProject" value="D:\simulation\painel triband.aedt">
             </label>
             <label>
@@ -78,41 +381,33 @@
                 <option value="pyaedt">pyaedt</option>
               </select>
             </label>
-            <label>
-              Saida S2P
+            <label class="wide-field">
+              Touchstone output
               <input id="aedtOutput" value="data\hfss_export.s2p">
             </label>
           </div>
-          <div class="button-row">
-            <button id="openAedt">Abrir</button>
-            <button id="loadVariables">Variaveis</button>
-            <button id="setVariables">Aplicar JSON</button>
-            <button id="evaluateAedt">Avaliar</button>
+          <div class="integration-actions">
+            <button id="openAedt">Open Project</button>
+            <button id="loadVariables">Read Variables</button>
+            <button id="setVariables">Apply Variables</button>
+            <button class="primary" id="evaluateAedt">Analyze &amp; Export</button>
           </div>
           <textarea id="variablesJson" spellcheck="false">{"arm_scale_a":1.02,"dist_refletor":"21mm"}</textarea>
-          <pre id="aedtOutputJson" class="output"></pre>
         </section>
 
-        <section class="panel content-panel" id="vnaPanel">
-          <div class="panel-heading">
-            <h2>VNA</h2>
-            <button class="icon-button" id="connectVnaSim" title="Conectar VNA simulado">
-              <span aria-hidden="true">&#9679;</span>
-              <span>Simulado</span>
-            </button>
-          </div>
-          <div class="form-grid">
-            <label>
-              Resource / IP
+        <section class="integration-view" id="vnaView">
+          <div class="integration-form vna-form">
+            <label class="wide-field">
+              VISA resource / IP
               <input id="vnaResource" value="SIM::VNA">
             </label>
             <label>
-              Marca
+              Brand
               <select id="vnaBrand">
                 <option value="SIM">SIM</option>
-                <option value="KS">KS</option>
-                <option value="RS">RS</option>
-                <option value="CMT">CMT</option>
+                <option value="KS">Keysight</option>
+                <option value="RS">Rohde &amp; Schwarz</option>
+                <option value="CMT">Copper Mountain</option>
               </select>
             </label>
             <label>
@@ -123,64 +418,42 @@
               </select>
             </label>
             <label>
-              Start Hz
-              <input id="startHz" type="number" value="600000000">
+              Points
+              <input id="vnaPoints" type="number" value="401">
             </label>
             <label>
-              Stop Hz
-              <input id="stopHz" type="number" value="1100000000">
+              IFBW (Hz)
+              <input id="vnaIfbw" type="number" value="1000">
             </label>
             <label>
-              Pontos
-              <input id="points" type="number" value="201">
+              Power (dBm)
+              <input id="vnaPower" type="number" value="-10">
             </label>
-            <label>
-              IFBW Hz
-              <input id="ifbw" type="number" value="1000">
-            </label>
-            <label>
-              Potencia dBm
-              <input id="power" type="number" value="-10">
-            </label>
-            <label>
-              Saida S2P
+            <label class="wide-field">
+              Touchstone output
               <input id="vnaOutput" value="data\vna_measurement.s2p">
             </label>
           </div>
-          <div class="button-row">
-            <button id="connectVna">Conectar</button>
-            <button id="applySweep">Configurar</button>
-            <button id="singleSweep">Sweep</button>
-            <button id="saveTrace">Salvar S2P</button>
+          <div class="integration-actions">
+            <button id="connectVna">Connect</button>
+            <button id="applySweep">Configure Sweep</button>
+            <button class="primary" id="singleSweep">Single Sweep</button>
+            <button id="saveTrace">Save S2P</button>
           </div>
-          <canvas id="sweepChart" width="960" height="280"></canvas>
-          <pre id="vnaOutputJson" class="output"></pre>
         </section>
 
-        <section class="panel content-panel" id="methodsPanel">
-          <div class="panel-heading">
-            <h2>Superficie SymMatrix</h2>
-            <button class="icon-button" id="loadMethods" title="Atualizar metodos">
-              <span aria-hidden="true">&#8635;</span>
-              <span>Atualizar</span>
-            </button>
-          </div>
-          <div id="methodMatrix" class="method-matrix"></div>
+        <section class="integration-view" id="logView">
+          <pre class="service-log" id="eventLog"></pre>
         </section>
 
-        <section class="panel content-panel" id="logPanel">
-          <div class="panel-heading">
-            <h2>Log</h2>
-            <button class="icon-button" id="clearLog" title="Limpar log">
-              <span aria-hidden="true">&times;</span>
-              <span>Limpar</span>
-            </button>
-          </div>
-          <pre id="eventLog" class="log"></pre>
-        </section>
-      </section>
-    </main>
+        <footer class="dialog-footer">
+          <span id="dialogStatus">Local server ready</span>
+          <a href="/health" target="_blank" rel="noreferrer">Open health JSON</a>
+        </footer>
+      </div>
+    </dialog>
 
+    <div class="toast" id="toast" role="status"></div>
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   </body>
 </html>

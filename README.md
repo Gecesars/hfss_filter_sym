@@ -11,13 +11,19 @@ O objetivo do projeto e fornecer uma base propria, documentada e testavel para:
 - controlar um VNA por SCPI via PyVISA;
 - operar em modo simulado quando AEDT ou hardware nao estiverem disponiveis;
 - integrar scripts, GUIs ou otimizadores sem acoplar a regra de negocio ao AEDT.
+- sintetizar respostas BPF, BSF, LPF e multi-banda no cockpit local;
+- visualizar parametros S, atraso de grupo, potencia, matriz e topologia;
+- editar/exportar matriz e salvar/carregar projetos JSON.
 
 Este repositorio nao contem codigo fonte recuperado, nomes internos proprietarios,
 patches, binarios, licencas, credenciais ou assets de terceiros. A implementacao foi
 escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 
+![HFSS Filter Studio workbench](docs/assets/filter-studio-workbench.png)
+
 ## Status
 
+- Versao da aplicacao: `0.2.0`
 - Python: `>=3.14`
 - Servidor padrao: Flask + JavaScript local
 - API tecnica opcional: FastAPI
@@ -26,6 +32,7 @@ escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 - Superficie SymMatrix MVP: `/aedt/<method>`, `/hfss/<method>` e `POST /<method>`
 - Testes offline: backends `simulated`
 - Saida de rede: Touchstone `.s2p`
+- UI: workstation desktop responsiva, sem dependencias frontend externas
 
 Validado localmente com:
 
@@ -147,6 +154,10 @@ hfss_vna_bridge/
 ```
 
 ## Endpoints Principais Flask/SymMatrix
+
+Sintese:
+
+- `POST /api/synthesis/calculate`
 
 VNA local:
 
@@ -327,6 +338,7 @@ hardware conectado.
 - [docs/setup.md](docs/setup.md): instalacao e ambiente.
 - [docs/api_reference.md](docs/api_reference.md): referencia HTTP.
 - [docs/symmatrix_mvp.md](docs/symmatrix_mvp.md): matriz MVP SymMatrix.
+- [docs/professional_ui.md](docs/professional_ui.md): contrato detalhado da interface.
 - [docs/architecture.md](docs/architecture.md): desenho da aplicacao.
 - [docs/aedt_contract.md](docs/aedt_contract.md): contrato AEDT/HFSS.
 - [docs/vna_contract.md](docs/vna_contract.md): contrato VNA/SCPI.
