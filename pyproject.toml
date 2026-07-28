@@ -37,6 +37,7 @@ dev = [
 
 [project.scripts]
 hfss-vna-bridge = "hfss_vna_bridge.cli:main"
+hfss-fd3d = "hfss_vna_bridge.fd3d_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hfss_vna_bridge"]
