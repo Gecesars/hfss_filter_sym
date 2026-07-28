@@ -8,6 +8,8 @@ from typing import Any
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.fd3d.assembly import build_combline_assembly_plan
 from hfss_vna_bridge.fd3d.external_q import run_hfss_external_q_study
+from hfss_vna_bridge.fd3d.matrix_extraction import extract_coupling_matrix
+from hfss_vna_bridge.fd3d.workflow import project_gate_status
 from hfss_vna_bridge.services.fd3d import execute_hfss_eigenmode_study
 
 
@@ -51,6 +53,20 @@ def main() -> int:
     assembly.add_argument("--require-characterized-external-q", action="store_true")
     assembly.add_argument("--without-tuning-screws", action="store_true")
 
+    matrix = subcommands.add_parser(
+        "extract-matrix",
+        help="Fit a topology-constrained coupling matrix to complex S-parameters.",
+    )
+    matrix.add_argument("--input", required=True, help="Extraction payload JSON")
+    matrix.add_argument("--output", required=True)
+
+    status = subcommands.add_parser(
+        "project-status",
+        help="Evaluate FD3D project workflow gates.",
+    )
+    status.add_argument("--project", required=True)
+    status.add_argument("--output")
+
     args = parser.parse_args()
     if args.command == "eigenmode":
         return _run_eigenmode(args)
@@ -58,6 +74,10 @@ def main() -> int:
         return _run_external_q(args)
     if args.command == "assembly-plan":
         return _write_assembly_plan(args)
+    if args.command == "extract-matrix":
+        return _extract_matrix(args)
+    if args.command == "project-status":
+        return _project_status(args)
     raise RuntimeError(f"unsupported command: {args.command}")
 
 
@@ -165,6 +185,28 @@ def _write_assembly_plan(args: argparse.Namespace) -> int:
     for warning in plan["validation"]["warnings"]:
         print(f"WARNING: {warning}")
     return 0 if plan["ready_for_hfss"] else 2
+
+
+def _extract_matrix(args: argparse.Namespace) -> int:
+    payload = _read_object(args.input)
+    result = extract_coupling_matrix(payload)
+    output = Path(args.output).expanduser().resolve()
+    _write_object(output, result)
+    print(f"Coupling-matrix extraction written: {output}")
+    print(f"Fit accepted: {result['ok']}")
+    print(f"RMS S11: {result['fit']['rms_s11_complex']:.6g}")
+    print(f"RMS S21: {result['fit']['rms_s21_complex']:.6g}")
+    print(f"Jacobian condition: {result['fit']['jacobian_condition_number']}")
+    return 0 if result["ok"] else 2
+
+
+def _project_status(args: argparse.Namespace) -> int:
+    status = project_gate_status(_read_object(args.project))
+    if args.output:
+        _write_object(Path(args.output).expanduser().resolve(), status)
+    else:
+        print(json.dumps(status, indent=2, ensure_ascii=False, sort_keys=True))
+    return 0 if status["valid_project"] else 2
 
 
 def _read_object(path_value: str | Path) -> dict[str, Any]:
