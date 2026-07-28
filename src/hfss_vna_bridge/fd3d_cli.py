@@ -8,7 +8,7 @@ from typing import Any
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.fd3d.assembly import build_combline_assembly_plan
 from hfss_vna_bridge.fd3d.external_q import run_hfss_external_q_study
-from hfss_vna_bridge.fd3d.matrix_extraction import extract_coupling_matrix
+from hfss_vna_bridge.fd3d.matrix_workflow import extract_coupling_matrix_staged
 from hfss_vna_bridge.fd3d.workflow import project_gate_status
 from hfss_vna_bridge.services.fd3d import execute_hfss_eigenmode_study
 
@@ -55,7 +55,7 @@ def main() -> int:
 
     matrix = subcommands.add_parser(
         "extract-matrix",
-        help="Fit a topology-constrained coupling matrix to complex S-parameters.",
+        help="De-embed reference planes and fit a topology-constrained coupling matrix.",
     )
     matrix.add_argument("--input", required=True, help="Extraction payload JSON")
     matrix.add_argument("--output", required=True)
@@ -189,7 +189,7 @@ def _write_assembly_plan(args: argparse.Namespace) -> int:
 
 def _extract_matrix(args: argparse.Namespace) -> int:
     payload = _read_object(args.input)
-    result = extract_coupling_matrix(payload)
+    result = extract_coupling_matrix_staged(payload)
     output = Path(args.output).expanduser().resolve()
     _write_object(output, result)
     print(f"Coupling-matrix extraction written: {output}")
