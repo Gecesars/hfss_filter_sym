@@ -7,7 +7,7 @@ from typing import Any
 
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.fd3d.assembly import build_combline_assembly_plan
-from hfss_vna_bridge.fd3d.external_q import run_hfss_external_q_study
+from hfss_vna_bridge.fd3d.external_q_workflow import run_real_external_q_study
 from hfss_vna_bridge.fd3d.matrix_workflow import extract_coupling_matrix_staged
 from hfss_vna_bridge.fd3d.workflow import project_gate_status
 from hfss_vna_bridge.services.fd3d import execute_hfss_eigenmode_study
@@ -146,7 +146,7 @@ def _run_external_q(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     adapter = _connect_adapter(args)
     try:
-        result = run_hfss_external_q_study(
+        result = run_real_external_q_study(
             adapter,
             plan,
             cores=args.cores,
