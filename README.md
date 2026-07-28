@@ -24,7 +24,8 @@ O objetivo do projeto e fornecer uma base propria, documentada e testavel para:
 - criar projetos FD3D-like com componentes, caracterizacoes e assembly rastreaveis;
 - executar caracterizacao real de ressonadores e pares no HFSS Eigenmode;
 - executar caracterizacao real de `Qe` no HFSS Driven Modal;
-- montar filtros combline em partes com dimensoes derivadas de curvas aprovadas.
+- montar filtros combline em partes com dimensoes derivadas de curvas aprovadas;
+- remover planos de referencia e extrair matriz de acoplamento de dados complexos.
 
 Este repositorio nao contem codigo fonte recuperado, nomes internos proprietarios,
 patches, binarios, licencas, credenciais ou assets de terceiros. A implementacao foi
@@ -48,7 +49,7 @@ escrita do zero usando apenas requisitos tecnicos de interoperabilidade.
 - testes offline: backends `simulated`;
 - saida de rede: Touchstone `.s2p`;
 - UI: workstation desktop responsiva, sem dependencias frontend externas;
-- FD3D: branch experimental com projetos, Eigenmode real, external Q, mapping, assembly e gates.
+- FD3D: branch experimental com projetos, Eigenmode real, external Q, mapping, assembly, matriz extraida e gates.
 
 Nenhum solve FD3D real foi executado pelo CI. A validacao final requer AEDT 2026.1 e licenca HFSS local.
 
@@ -172,7 +173,7 @@ hfss-fd3d external-q `
   --new-desktop
 ```
 
-Cada profundidade de probe e resolvida no HFSS Driven Modal. O `S11` complexo e ajustado para extrair `f0`, `QL`, `Qe`, `Qi`, beta, fase e atraso.
+Cada profundidade de probe e resolvida no HFSS Driven Modal. O `S11` complexo e ajustado para extrair `f0`, `QL`, `Qe`, `Qi`, beta, fase e atraso. O dielétrico coaxial termina na parede interna; apenas o pino penetra a cavidade.
 
 ### Assembly em partes
 
@@ -185,6 +186,22 @@ hfss-fd3d assembly-plan `
 ```
 
 O assembly inclui housing, cavidades, ressonadores, iris, probes e parafusos de sintonia como partes rastreaveis. Cross couplings sem realizacao fisica bloqueiam o build.
+
+### Extracao da matriz
+
+```powershell
+hfss-fd3d extract-matrix `
+  --input data\fd3d\matrix_extraction_input.json `
+  --output data\fd3d\matrix_extraction_result.json
+```
+
+O fluxo padrao estima e remove fase/atraso dos planos de referencia antes de ajustar a matriz permitida pela topologia. O resultado inclui matriz extraida, desvios, residuos complexos, sensibilidades, incertezas e condicao numerica.
+
+### Gates do projeto
+
+```powershell
+hfss-fd3d project-status --project data\fd3d\project.json
+```
 
 Documentacao:
 
