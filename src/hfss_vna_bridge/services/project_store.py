@@ -139,9 +139,15 @@ def _normalize_project(payload: dict[str, Any]) -> dict[str, Any]:
     matrix = payload.get("matrix")
     if matrix is not None and not isinstance(matrix, dict):
         raise TypeError("Project matrix must be an object or null")
+    fd3d = payload.get("fd3d")
+    if fd3d is not None and not isinstance(fd3d, dict):
+        raise TypeError("Project fd3d data must be an object or null")
+    workflow = payload.get("workflow") or {}
+    if not isinstance(workflow, dict):
+        raise TypeError("Project workflow must be an object")
     return {
         "format": PROJECT_FORMAT,
-        "version": 2,
+        "version": 3,
         "name": name[:120],
         "description": str(payload.get("description") or "")[:2000],
         "specification": deepcopy(specification),
@@ -149,11 +155,29 @@ def _normalize_project(payload: dict[str, Any]) -> dict[str, Any]:
         "integration": deepcopy(payload.get("integration") or {}),
         "measurements": deepcopy(payload.get("measurements") or {}),
         "metadata": deepcopy(payload.get("metadata") or {}),
+        "workflow": deepcopy(workflow),
+        "fd3d": deepcopy(fd3d),
+        "components": _list_of_objects(payload, "components"),
+        "characterizations": _list_of_objects(payload, "characterizations"),
+        "assembly": deepcopy(payload.get("assembly") or {}),
+        "analyses": _list_of_objects(payload, "analyses"),
+        "optimizations": _list_of_objects(payload, "optimizations"),
+        "tuning_sessions": _list_of_objects(payload, "tuning_sessions"),
+        "artifacts": _list_of_objects(payload, "artifacts"),
     }
+
+
+def _list_of_objects(payload: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    value = payload.get(name) or []
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise TypeError(f"Project {name} must be a list of objects")
+    return deepcopy(value)
 
 
 def _summary(project: dict[str, Any]) -> dict[str, Any]:
     specification = project.get("specification") or {}
+    workflow = project.get("workflow") or {}
+    fd3d = project.get("fd3d") or {}
     return {
         "id": project.get("id"),
         "name": project.get("name"),
@@ -164,6 +188,8 @@ def _summary(project: dict[str, Any]) -> dict[str, Any]:
         "filter_type": specification.get("filter_type"),
         "order": specification.get("order"),
         "f0_ghz": specification.get("f0_ghz"),
+        "workflow_stage": workflow.get("stage") or fd3d.get("stage"),
+        "fd3d_schema": fd3d.get("schema"),
     }
 
 
