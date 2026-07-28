@@ -1,0 +1,29 @@
+name: FD3D Platform CI
+
+on:
+  push:
+    branches:
+      - feature/fd3d-project-platform
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Compile sources
+        run: python -m compileall -q src tests
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Ruff critical checks
+        run: python -m ruff check src tests --select E9,F63,F7,F82
