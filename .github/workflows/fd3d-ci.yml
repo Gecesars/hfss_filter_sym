@@ -1,0 +1,39 @@
+name: FD3D Platform CI
+
+on:
+  push:
+    branches:
+      - feature/fd3d-project-platform
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip --quiet
+          python -m pip install -e ".[dev,aedt]" --quiet
+      - name: Compile sources
+        run: python -m compileall -q src tests
+      - name: Run tests
+        shell: pwsh
+        run: |
+          python -m pytest -q --tb=short -x 2>&1 | Tee-Object -FilePath pytest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fd3d-pytest-${{ github.run_id }}
+          path: pytest.log
+          if-no-files-found: warn
+      - name: Ruff critical checks
+        run: python -m ruff check src tests --select E9,F63,F7,F82
