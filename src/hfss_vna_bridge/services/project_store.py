@@ -139,15 +139,31 @@ def _normalize_project(payload: dict[str, Any]) -> dict[str, Any]:
     matrix = payload.get("matrix")
     if matrix is not None and not isinstance(matrix, dict):
         raise TypeError("Project matrix must be an object or null")
+
     fd3d = payload.get("fd3d")
     if fd3d is not None and not isinstance(fd3d, dict):
         raise TypeError("Project fd3d data must be an object or null")
     workflow = payload.get("workflow") or {}
     if not isinstance(workflow, dict):
         raise TypeError("Project workflow must be an object")
-    return {
+
+    extended_fields = (
+        "fd3d",
+        "workflow",
+        "components",
+        "characterizations",
+        "assembly",
+        "analyses",
+        "optimizations",
+        "tuning_sessions",
+        "artifacts",
+    )
+    is_fd3d = fd3d is not None or any(
+        bool(payload.get(field_name)) for field_name in extended_fields
+    )
+    project = {
         "format": PROJECT_FORMAT,
-        "version": 3,
+        "version": 3 if is_fd3d else 2,
         "name": name[:120],
         "description": str(payload.get("description") or "")[:2000],
         "specification": deepcopy(specification),
@@ -155,16 +171,22 @@ def _normalize_project(payload: dict[str, Any]) -> dict[str, Any]:
         "integration": deepcopy(payload.get("integration") or {}),
         "measurements": deepcopy(payload.get("measurements") or {}),
         "metadata": deepcopy(payload.get("metadata") or {}),
-        "workflow": deepcopy(workflow),
-        "fd3d": deepcopy(fd3d),
-        "components": _list_of_objects(payload, "components"),
-        "characterizations": _list_of_objects(payload, "characterizations"),
-        "assembly": deepcopy(payload.get("assembly") or {}),
-        "analyses": _list_of_objects(payload, "analyses"),
-        "optimizations": _list_of_objects(payload, "optimizations"),
-        "tuning_sessions": _list_of_objects(payload, "tuning_sessions"),
-        "artifacts": _list_of_objects(payload, "artifacts"),
     }
+    if is_fd3d:
+        project.update(
+            {
+                "workflow": deepcopy(workflow),
+                "fd3d": deepcopy(fd3d),
+                "components": _list_of_objects(payload, "components"),
+                "characterizations": _list_of_objects(payload, "characterizations"),
+                "assembly": deepcopy(payload.get("assembly") or {}),
+                "analyses": _list_of_objects(payload, "analyses"),
+                "optimizations": _list_of_objects(payload, "optimizations"),
+                "tuning_sessions": _list_of_objects(payload, "tuning_sessions"),
+                "artifacts": _list_of_objects(payload, "artifacts"),
+            }
+        )
+    return project
 
 
 def _list_of_objects(payload: dict[str, Any], name: str) -> list[dict[str, Any]]:
