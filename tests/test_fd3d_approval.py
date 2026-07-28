@@ -48,8 +48,9 @@ def _review() -> dict:
         "evidence": ["field_plot_mode1.png", "eigenmode_report.csv"],
         "mode_identity_reviewed": True,
         "field_distribution_reviewed": True,
+        "mode_crossing_reviewed": True,
         "minimum_q": 4000.0,
-        "notes": "Fundamental combline mode confirmed across the sweep.",
+        "notes": "Fundamental combline mode and continuity confirmed across the sweep.",
     }
 
 
@@ -60,6 +61,7 @@ def test_real_hfss_curve_requires_explicit_review_and_gets_digest() -> None:
     approval = approved.metadata["approval"]
     assert approval["schema"].endswith("characterization-approval/v1")
     assert approval["reviewer"] == "RF Engineer"
+    assert approval["mode_crossing_reviewed"] is True
     assert len(approval["curve_digest_sha256"]) == 64
     assert approval["quality_factor_review"]["accepted"] is True
 
@@ -91,6 +93,7 @@ def test_coupling_sign_must_match_field_parity_review() -> None:
         **_review(),
         "field_parity_reviewed": True,
         "coupling_sign": -1,
+        "segmented_monotonic_branch": True,
     }
 
     with pytest.raises(ValueError, match="does not match"):
