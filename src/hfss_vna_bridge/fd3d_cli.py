@@ -7,6 +7,7 @@ from typing import Any
 
 from hfss_vna_bridge.adapters.aedt.pyaedt_adapter import PyAedtAdapter
 from hfss_vna_bridge.fd3d.assembly import build_combline_assembly_plan
+from hfss_vna_bridge.fd3d.external_q import run_hfss_external_q_study
 from hfss_vna_bridge.services.fd3d import execute_hfss_eigenmode_study
 
 
@@ -21,24 +22,21 @@ def main() -> int:
         "eigenmode",
         help="Run a real HFSS Eigenmode component characterization.",
     )
+    _add_aedt_connection_arguments(eigen)
     eigen.add_argument("--plan", required=True)
     eigen.add_argument("--output", required=True)
-    eigen.add_argument("--project")
-    eigen.add_argument("--design")
-    eigen.add_argument("--version", default="2026.1")
-    eigen.add_argument("--machine", default=None)
-    eigen.add_argument("--port", type=int, default=None)
-    eigen.add_argument("--pid", type=int, default=None)
-    eigen.add_argument("--new-desktop", action="store_true")
-    eigen.add_argument("--non-graphical", action="store_true")
-    eigen.add_argument("--cores", type=int, default=None)
-    eigen.add_argument("--tasks", type=int, default=None)
-    eigen.add_argument("--gpus", type=int, default=None)
     eigen.add_argument("--mode-index", type=int, default=0)
     eigen.add_argument("--lower-mode-index", type=int, default=0)
     eigen.add_argument("--upper-mode-index", type=int, default=1)
     eigen.add_argument("--coupling-sign", type=float, choices=(-1.0, 1.0), default=1.0)
-    eigen.add_argument("--close-desktop", action="store_true")
+
+    external_q = subcommands.add_parser(
+        "external-q",
+        help="Run a real HFSS Driven Modal external-Q characterization.",
+    )
+    _add_aedt_connection_arguments(external_q)
+    external_q.add_argument("--plan", required=True)
+    external_q.add_argument("--output", required=True)
 
     assembly = subcommands.add_parser(
         "assembly-plan",
@@ -56,27 +54,49 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "eigenmode":
         return _run_eigenmode(args)
+    if args.command == "external-q":
+        return _run_external_q(args)
     if args.command == "assembly-plan":
         return _write_assembly_plan(args)
     raise RuntimeError(f"unsupported command: {args.command}")
 
 
+def _add_aedt_connection_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--project")
+    parser.add_argument("--design")
+    parser.add_argument("--version", default="2026.1")
+    parser.add_argument("--machine", default=None)
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--pid", type=int, default=None)
+    parser.add_argument("--new-desktop", action="store_true")
+    parser.add_argument("--non-graphical", action="store_true")
+    parser.add_argument("--cores", type=int, default=None)
+    parser.add_argument("--tasks", type=int, default=None)
+    parser.add_argument("--gpus", type=int, default=None)
+    parser.add_argument("--close-desktop", action="store_true")
+
+
+def _connect_adapter(args: argparse.Namespace) -> PyAedtAdapter:
+    adapter = PyAedtAdapter()
+    adapter.connect(
+        project_path=args.project,
+        design_name=args.design,
+        version=args.version,
+        new_desktop=args.new_desktop,
+        non_graphical=args.non_graphical,
+        close_on_exit=False,
+        machine=args.machine,
+        port=args.port,
+        aedt_process_id=args.pid,
+    )
+    return adapter
+
+
 def _run_eigenmode(args: argparse.Namespace) -> int:
     plan = _read_object(args.plan)
     output = Path(args.output).expanduser().resolve()
-    adapter = PyAedtAdapter()
+    adapter = _connect_adapter(args)
     try:
-        adapter.connect(
-            project_path=args.project,
-            design_name=args.design,
-            version=args.version,
-            new_desktop=args.new_desktop,
-            non_graphical=args.non_graphical,
-            close_on_exit=False,
-            machine=args.machine,
-            port=args.port,
-            aedt_process_id=args.pid,
-        )
         result = execute_hfss_eigenmode_study(
             adapter,
             {
@@ -96,6 +116,29 @@ def _run_eigenmode(args: argparse.Namespace) -> int:
         print(f"Design: {result['study']['design']}")
         print(f"Samples: {result['study']['sample_count']}")
         print("Engineering approval: pending field and mode review")
+        return 0
+    finally:
+        adapter.release(close_projects=False, close_desktop=args.close_desktop)
+
+
+def _run_external_q(args: argparse.Namespace) -> int:
+    plan = _read_object(args.plan)
+    output = Path(args.output).expanduser().resolve()
+    adapter = _connect_adapter(args)
+    try:
+        result = run_hfss_external_q_study(
+            adapter,
+            plan,
+            cores=args.cores,
+            tasks=args.tasks,
+            gpus=args.gpus,
+            save_project=True,
+        )
+        _write_object(output, result)
+        print(f"HFSS external-Q study completed: {output}")
+        print(f"Design: {result['design']}")
+        print(f"Samples: {len(result['samples'])}")
+        print("Engineering approval: pending complex-fit and reference-plane review")
         return 0
     finally:
         adapter.release(close_projects=False, close_desktop=args.close_desktop)
