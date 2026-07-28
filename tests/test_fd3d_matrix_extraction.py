@@ -5,6 +5,7 @@ import pytest
 
 from hfss_vna_bridge.engines.filter_engine import coupling_matrix_response
 from hfss_vna_bridge.fd3d.matrix_extraction import extract_coupling_matrix
+from hfss_vna_bridge.fd3d.matrix_workflow import extract_coupling_matrix_staged
 
 
 def _matrix() -> np.ndarray:
@@ -87,9 +88,9 @@ def test_complex_fit_recovers_matrix_entries_from_fullwave_network() -> None:
     assert extracted == pytest.approx(actual, abs=2e-3)
 
 
-def test_reference_plane_phase_and_delay_are_not_absorbed_by_matrix() -> None:
+def test_reference_plane_phase_and_delay_are_prefit_before_matrix() -> None:
     actual = _matrix()
-    result = extract_coupling_matrix(
+    result = extract_coupling_matrix_staged(
         _payload(
             actual,
             actual,
@@ -97,15 +98,16 @@ def test_reference_plane_phase_and_delay_are_not_absorbed_by_matrix() -> None:
             delay_s11=1.2e-9,
             phase_s21=-0.22,
             delay_s21=0.8e-9,
-            fit_reference_planes=True,
         )
     )
 
     assert result["ok"] is True
+    assert result["method"] == "staged-reference-plane-and-topology-constrained-matrix-fit"
     assert result["settings"]["phase_s11_rad"] == pytest.approx(0.34, abs=2e-3)
     assert result["settings"]["delay_s11_s"] == pytest.approx(1.2e-9, rel=0.02)
     assert result["settings"]["phase_s21_rad"] == pytest.approx(-0.22, abs=2e-3)
     assert result["settings"]["delay_s21_s"] == pytest.approx(0.8e-9, rel=0.02)
+    assert result["traceability"]["reference_plane_strategy"] == "prefit-weighted-linear-phase"
 
 
 def test_extraction_rejects_asymmetric_initial_matrix() -> None:
